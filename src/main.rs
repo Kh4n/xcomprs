@@ -1,72 +1,16 @@
-use std::error::Error;
-
 mod gl;
+mod glx;
 mod xlib;
+
+use std::ffi::CString;
 
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::composite::ConnectionExt as composite_ConnectionExt;
 use x11rb::protocol::xproto::{
-    Atom, ChangeWindowAttributesAux, ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent,
-    EventMask, Window,
+    ChangeWindowAttributesAux, ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent, EventMask,
+    Window,
 };
 use x11rb::protocol::Event::*;
-
-struct AtomsNeeded {
-    opacity_atom: Atom,
-    win_type_atom: Atom,
-    win_desktop_atom: Atom,
-    win_dock_atom: Atom,
-    win_toolbar_atom: Atom,
-    win_menu_atom: Atom,
-    win_util_atom: Atom,
-    win_splash_atom: Atom,
-    win_dialog_atom: Atom,
-    win_normal_atom: Atom,
-}
-
-impl AtomsNeeded {
-    fn new(conn: &impl Connection) -> Result<AtomsNeeded, Box<dyn Error>> {
-        return Ok(AtomsNeeded {
-            opacity_atom: conn
-                .intern_atom(false, b"_NET_WM_WINDOW_OPACITY")?
-                .reply()?
-                .atom,
-            win_type_atom: conn
-                .intern_atom(false, b"_NET_WM_WINDOW_TYPE")?
-                .reply()?
-                .atom,
-            win_desktop_atom: conn
-                .intern_atom(false, b"_NET_WM_WINDOW_TYPE_DESKTOP")?
-                .reply()?
-                .atom,
-            win_dock_atom: conn.intern_atom(false, b"_NET_WM_TYPE_DOCK")?.reply()?.atom,
-            win_toolbar_atom: conn
-                .intern_atom(false, b"_NET_WM_TYPE_TOOLBAR")?
-                .reply()?
-                .atom,
-            win_menu_atom: conn
-                .intern_atom(false, b"_NET_WM_WINDOW_TYPE_MENU")?
-                .reply()?
-                .atom,
-            win_util_atom: conn
-                .intern_atom(false, b"_NET_WM_WINDOW_TYPE_UTILITY")?
-                .reply()?
-                .atom,
-            win_splash_atom: conn
-                .intern_atom(false, b"_NET_WM_WINDOW_TYPE_SPLASH")?
-                .reply()?
-                .atom,
-            win_dialog_atom: conn
-                .intern_atom(false, b"_NET_WM_WINDOW_TYPE_DIALOG")?
-                .reply()?
-                .atom,
-            win_normal_atom: conn
-                .intern_atom(false, b"_NET_WM_WINDOW_TYPE_NORMAL")?
-                .reply()?
-                .atom,
-        });
-    }
-}
 
 #[derive(Debug)]
 struct Win {
@@ -92,11 +36,12 @@ impl Win {
         }
     }
 }
-// gl::load_with(|s| unsafe {
-//     let c_str = CString::new(s).unwrap();
-//     xlib::glXGetProcAddress(c_str.as_ptr() as *const u8).unwrap() as *const _
-// });
 pub fn main() {
+    gl::load_with(|s| unsafe {
+        let c_str = CString::new(s).unwrap();
+        glx::GetProcAddressARB(c_str.as_ptr() as *const u8) as *const _
+    });
+
     let (conn, screen_num) = x11rb::connect(None).expect("Can't connect to x server: ");
     let root = conn.setup().roots[screen_num].root;
     let extensions = vec!["RENDER", "Composite", "DAMAGE", "XFIXES", "SHAPE", "GLX"];

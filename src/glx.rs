@@ -4,4 +4,4 @@
 #![allow(unused)]
 #![allow(deref_nullptr)]
 #![allow(bare_trait_objects)]
-include!(concat!(env!("OUT_DIR"), "/gl_bindings.rs"));
+include!(concat!(env!("OUT_DIR"), "/glx_bindings.rs"));
