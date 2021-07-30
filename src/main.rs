@@ -1,5 +1,6 @@
 use std::error::Error;
 
+mod gl;
 mod xlib;
 
 use x11rb::connection::{Connection, RequestConnection};
@@ -91,7 +92,10 @@ impl Win {
         }
     }
 }
-
+// gl::load_with(|s| unsafe {
+//     let c_str = CString::new(s).unwrap();
+//     xlib::glXGetProcAddress(c_str.as_ptr() as *const u8).unwrap() as *const _
+// });
 pub fn main() {
     let (conn, screen_num) = x11rb::connect(None).expect("Can't connect to x server: ");
     let root = conn.setup().roots[screen_num].root;

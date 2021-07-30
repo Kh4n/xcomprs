@@ -11,6 +11,7 @@ x11rb = "0.8.1"
 
 [build-dependencies]
 bindgen = "0.59.1"
+gl_generator = "0.5.4"
 
 [features]
 default = ["x11rb/composite"]

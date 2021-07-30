@@ -3,4 +3,4 @@
 #![allow(non_snake_case)]
 #![allow(unused)]
 #![allow(deref_nullptr)]
-include!(concat!(env!("OUT_DIR"), "/xlib_bindings.rs"));
+include!(concat!(env!("OUT_DIR"), "/gl_bindings.rs"));
