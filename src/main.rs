@@ -20,7 +20,9 @@ struct Win {
     width: u16,
     height: u16,
     border_width: u16,
+
     override_redirect: bool,
+    mapped: bool,
 }
 
 impl Win {
@@ -33,6 +35,7 @@ impl Win {
             height: evt.height,
             border_width: evt.border_width,
             override_redirect: evt.override_redirect,
+            mapped: false,
         }
     }
 }
@@ -100,6 +103,14 @@ pub fn main() {
                 CreateNotify(create) => {
                     wins.push(Win::new(create));
                     println!("hello");
+                }
+                MapNotify(map) => {
+                    for w in &mut wins {
+                        if w.handle == map.window {
+                            w.mapped = true;
+                            w.override_redirect = map.override_redirect;
+                        }
+                    }
                 }
                 _ => println!("Unhandled event: {:?}", e),
             },

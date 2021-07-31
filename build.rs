@@ -21,7 +21,6 @@ const XLIB_VARS: [&str; 1] = ["None"];
 
 fn main() {
     println!("cargo:rerun-if-changed=xlib_libs.h");
-
     println!("cargo:rustc-link-lib=X11");
     println!("cargo:rustc-link-lib=X11-xcb");
     println!("cargo:rustc-link-lib=GL");
