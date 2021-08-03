@@ -8,7 +8,7 @@ const GL_BINDINGS_FILE: &str = "gl_bindings.rs";
 const GLX_BINDINGS_FILE: &str = "glx_bindings.rs";
 const XLIB_BINDINGS_FILE: &str = "xlib_bindings.rs";
 
-const GLX_EXTENSIONS: [&str; 2] = ["GLX_EXT_texture_from_pixmap", "GLX_ARB_get_proc_address"];
+const GLX_EXTENSIONS: [&str; 1] = ["GLX_EXT_texture_from_pixmap"];
 
 const XLIB_FUNCTIONS: [&str; 5] = [
     "XOpenDisplay",
@@ -48,7 +48,7 @@ fn main() {
     let mut file = File::create(&Path::new(&dest).join(GLX_BINDINGS_FILE)).unwrap();
     Registry::new(
         Api::Glx,
-        (1, 3),
+        (1, 4),
         Profile::Core,
         Fallbacks::All,
         GLX_EXTENSIONS,
