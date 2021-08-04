@@ -10,9 +10,12 @@ use std::ptr::{null, null_mut};
 
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::composite::ConnectionExt as composite_ConnectionExt;
+use x11rb::protocol::shape::{ConnectionExt as shape_CompositeExt, SK, SO};
+use x11rb::protocol::xfixes::{ConnectionExt, Region};
 use x11rb::protocol::xproto::{
-    ChangeWindowAttributesAux, ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent, EventMask,
-    MapNotifyEvent, Window,
+    ChangeWindowAttributesAux, ClipOrdering, ConfigureNotifyEvent,
+    ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent, EventMask, MapNotifyEvent, Pixmap,
+    Rectangle, Window,
 };
 use x11rb::protocol::Event::*;
 use x11rb::xcb_ffi::XCBConnection;
@@ -160,14 +163,14 @@ impl GLRenderer {
             gl::DeleteShader(frag_shader);
         }
 
-        // TODO: maybe make this cleaner somehow
+        // TODO: maybe make this cleaner somehow (standardized somehow as well)
         #[rustfmt::skip]
         let verts: [f32; (2 + 2) * 4] = [
             //  x,y, u,v
-            0.0, 0.0, 0.0, 0.0,
-            1.0, 0.0, 1.0, 0.0,
-            0.0, 1.0, 0.0, 1.0,
-            1.0, 1.0, 1.0, 1.0,
+             0.0,  0.0,  0.0,  1.0,
+             0.0, -1.0,  0.0,  0.0,
+             1.0,  0.0,  1.0,  1.0,
+             1.0, -1.0,  1.0,  0.0,
         ];
         #[rustfmt::skip]
         let indices: [u32; 3 * 2] = [
@@ -225,10 +228,16 @@ impl GLRenderer {
         win.vao = self.rect_vao;
     }
 
-    fn map(&self, win: &mut Win, display: *mut glx::types::Display, config: *const c_void) {
-        // must get pixmap when window is mapped
-        // otherwise we get a bad match because the window is not viewable
+    fn reacquire_glx_pixmap(
+        &self,
+        win: &mut Win,
+        display: *mut glx::types::Display,
+        config: *const c_void,
+    ) {
         unsafe {
+            if win.glx_pixmap != 0 {
+                glx::DestroyGLXPixmap(display, win.glx_pixmap);
+            }
             win.glx_pixmap = glx::CreatePixmap(
                 display,
                 config,
@@ -240,8 +249,12 @@ impl GLRenderer {
             glx::BindTexImageEXT(display, win.glx_pixmap, glx::FRONT_EXT as i32, null());
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+            // nearest, as the windows should be a 1:1 match
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+            // TODO: find out why using linear makes it blurry (it really shouldn't)
+            // gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+            // gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
         }
     }
 }
@@ -264,12 +277,21 @@ struct Win {
 }
 
 impl Win {
-    fn new(evt: CreateNotifyEvent, renderer: &GLRenderer) -> Result<Win, Box<dyn Error>> {
+    fn new_raw(
+        handle: Window,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        border_width: u16,
+        override_redirect: bool,
+        renderer: &GLRenderer,
+    ) -> Result<Win, Box<dyn Error>> {
         let mut ret = Win {
-            handle: evt.window,
-            rect: Rect::new(evt.x, evt.y, evt.width, evt.height),
-            border_width: evt.border_width,
-            override_redirect: evt.override_redirect,
+            handle: handle,
+            rect: Rect::new(x, y, width, height),
+            border_width: border_width,
+            override_redirect: override_redirect,
             mapped: false,
 
             pixmap: 0,
@@ -279,6 +301,18 @@ impl Win {
         };
         renderer.initialize(&mut ret);
         Ok(ret)
+    }
+    fn new(evt: CreateNotifyEvent, renderer: &GLRenderer) -> Result<Win, Box<dyn Error>> {
+        Win::new_raw(
+            evt.window,
+            evt.x,
+            evt.y,
+            evt.width,
+            evt.height,
+            evt.border_width,
+            evt.override_redirect,
+            &renderer,
+        )
     }
 
     fn map(
@@ -291,11 +325,45 @@ impl Win {
     ) -> Result<(), Box<dyn Error>> {
         self.mapped = true;
         self.override_redirect = evt.override_redirect;
+        self.reacquire_pixmap(evt.window, display, config, conn, renderer)?;
+        Ok(())
+    }
 
+    fn reacquire_pixmap(
+        &mut self,
+        window: Window,
+        display: *mut glx::types::Display,
+        config: *const c_void,
+        conn: &impl x11rb::connection::Connection,
+        renderer: &GLRenderer,
+    ) -> Result<(), Box<dyn Error>> {
+        if !self.mapped {
+            // if we're not mapped, no pixmap to reacquire
+            return Ok(());
+        }
         self.pixmap = conn.generate_id().expect("could not gen id");
-        conn.composite_name_window_pixmap(evt.window, self.pixmap)?
+        conn.composite_name_window_pixmap(window, self.pixmap)?
             .check()?;
-        renderer.map(self, display, config);
+        renderer.reacquire_glx_pixmap(self, display, config);
+        Ok(())
+    }
+
+    // TODO: handle all configure notify possibilities (stacking order, etc.)
+    fn configure(
+        &mut self,
+        evt: ConfigureNotifyEvent,
+        display: *mut glx::types::Display,
+        config: *const c_void,
+        conn: &impl x11rb::connection::Connection,
+        renderer: &GLRenderer,
+    ) -> Result<(), Box<dyn Error>> {
+        self.rect.x = evt.x;
+        self.rect.y = evt.y;
+        if self.rect.width != evt.width || self.rect.height != evt.height {
+            self.reacquire_pixmap(evt.window, display, config, conn, renderer)?;
+            self.rect.width = evt.width;
+            self.rect.height = evt.height;
+        }
         Ok(())
     }
 }
@@ -317,7 +385,10 @@ pub fn main() {
     }
 
     let root = conn.setup().roots[screen_num].root;
+    let width = conn.setup().roots[screen_num].width_in_pixels;
+    let height = conn.setup().roots[screen_num].height_in_pixels;
     println!("root: {}", root);
+    println!("width, height: {}, {}", width, height);
     let extensions = vec!["RENDER", "Composite", "DAMAGE", "XFIXES", "SHAPE", "GLX"];
     for ext in extensions.iter() {
         match conn.extension_information(ext).unwrap() {
@@ -325,21 +396,31 @@ pub fn main() {
             None => panic!("missing extension '{}'", ext),
         };
     }
+    // MUST QUERY VERSIONS BEFORE USE!!
     let version_reply = conn
         .composite_query_version(0, 5)
-        .expect("composite version not compatible")
+        .expect("could not connect to server")
         .reply()
-        .expect("unable to get version reply");
+        .expect("composite version not compatible");
     println!(
         "Composite V{}.{}",
         version_reply.major_version, version_reply.minor_version
+    );
+    let xfixes_ver_reply = conn
+        .xfixes_query_version(5, 0)
+        .expect("could not connect to server")
+        .reply()
+        .expect("could not query xfixes version");
+    println!(
+        "XFixes V{}.{}",
+        xfixes_ver_reply.major_version, xfixes_ver_reply.minor_version
     );
 
     let mut maj: i32 = 0;
     let mut min: i32 = 0;
     let has_glx =
         unsafe { glx::QueryVersion(display as *mut glx::types::Display, &mut maj, &mut min) };
-    if has_glx == 0 {
+    if has_glx == gl::FALSE as i32 {
         panic!("GLX not supported");
     }
     println!("GLX V{}.{}", maj, min);
@@ -384,17 +465,53 @@ pub fn main() {
 
     let overlay = conn
         .composite_get_overlay_window(root)
-        .expect("unable to get overlay window")
+        .expect("could not connect to server")
         .reply()
-        .expect("reply error")
+        .expect("unable to get overlay window")
         .overlay_win;
     println!("overlay: {}", overlay);
+
+    // currently not using this method to let input pass through overlay
+    // it works, but I have no clue how
+    // TODO: figure out wtf these functions do?
+    // conn.shape_mask(SO::SET, SK::BOUNDING, overlay, 0, 0, 0 as Pixmap)
+    //     .expect("unable to mask shape (?)")
+    //     .check()
+    //     .expect("error checking reply");
+    // conn.shape_rectangles(
+    //     SO::SET,
+    //     SK::INPUT,
+    //     ClipOrdering::UNSORTED,
+    //     overlay,
+    //     0,
+    //     0,
+    //     &[],
+    // )
+    // .expect("unable to set shape rectangles (?)")
+    // .check()
+    // .expect("error getting reply");
+
+    let mut rect = [Rectangle {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    }];
+    let region = conn.generate_id().expect("could not generate id");
+    conn.xfixes_create_region(region, &mut rect)
+        .expect("could not connect to server")
+        .check()
+        .expect("could not create region");
+    conn.xfixes_set_window_shape_region(overlay, SK::INPUT, 0, 0, region as Region)
+        .expect("could not connect to server")
+        .check()
+        .expect("unable to set overlay shape region");
+
     let context_success =
         unsafe { glx::MakeCurrent(display as *mut glx::types::Display, overlay as u64, glx_ctx) };
     if context_success == 0 {
         panic!("unable to make context current");
     }
-
     gl::load_with(|s| unsafe {
         let c_str = CString::new(s).unwrap();
         glx::GetProcAddress(c_str.as_ptr() as *const u8) as *const _
@@ -410,7 +527,7 @@ pub fn main() {
     let renderer = GLRenderer::new().expect("unable to create renderer");
 
     conn.composite_redirect_subwindows(root, x11rb::protocol::composite::Redirect::MANUAL)
-        .unwrap()
+        .expect("could not connect to server")
         .check()
         .expect("failed to redirect, is another compositor running?");
     conn.change_window_attributes(
@@ -422,12 +539,12 @@ pub fn main() {
                 | EventMask::PROPERTY_CHANGE,
         ),
     )
-    .unwrap()
+    .expect("could not connect to server")
     .check()
     .expect("unable to register event masks");
     let children = conn
         .query_tree(root)
-        .unwrap()
+        .expect("could not connect to server")
         .reply()
         .expect("unable to query children")
         .children;
@@ -436,6 +553,29 @@ pub fn main() {
         println!("Untracked window id: {}", child);
     }
     let mut wins: Vec<Win> = vec![];
+    let root_geom = conn
+        .get_geometry(root)
+        .expect("could not connect to server")
+        .reply()
+        .expect("could not get geometry");
+    let root_attrs = conn
+        .get_window_attributes(root)
+        .expect("could not connect to server")
+        .reply()
+        .expect("could not get root window attributes");
+    wins.push(
+        Win::new_raw(
+            root,
+            root_geom.x,
+            root_geom.y,
+            root_geom.width,
+            root_geom.height,
+            root_geom.border_width,
+            root_attrs.override_redirect,
+            &renderer,
+        )
+        .expect("could not construct root window"),
+    );
     loop {
         let event = conn.poll_for_event().unwrap();
         match event {
@@ -446,18 +586,39 @@ pub fn main() {
                         wins.push(Win::new(create, &renderer).expect("could not track window"));
                     }
                     MapNotify(map) => {
-                        for w in &mut wins {
-                            if w.handle == map.window {
-                                w.map(
-                                    map,
-                                    display as *mut glx::types::Display,
-                                    fb_config as *const c_void,
-                                    &conn,
-                                    &renderer,
-                                )
-                                .expect("could not map window");
-                            }
-                        }
+                        let w = wins
+                            .iter_mut()
+                            .find(|w| w.handle == map.window)
+                            .expect("map notified with untracked window!");
+                        w.map(
+                            map,
+                            display as *mut glx::types::Display,
+                            fb_config as *const c_void,
+                            &conn,
+                            &renderer,
+                        )
+                        .expect("could not map window");
+                    }
+                    ConfigureNotify(conf) => {
+                        let w = wins
+                            .iter_mut()
+                            .find(|w| w.handle == conf.window)
+                            .expect("configure notified with untracked window!");
+                        w.configure(
+                            conf,
+                            display as *mut glx::types::Display,
+                            fb_config,
+                            &conn,
+                            &renderer,
+                        )
+                        .expect("could not configure window");
+                    }
+                    DestroyNotify(destroy) => {
+                        wins.remove(
+                            wins.iter()
+                                .position(|w| w.handle == destroy.window)
+                                .expect("destroy notify for untracked window"),
+                        );
                     }
                     _ => println!("unhandled event!"),
                 }
@@ -476,10 +637,16 @@ pub fn main() {
             );
             gl::BindVertexArray(renderer.rect_vao);
 
-            let uniform_name = CString::new("win_rect").expect("unable to create cstring");
+            let screen_rect_name = CString::new("screen_rect").expect("unable to create cstring");
+            gl::Uniform2f(
+                gl::GetUniformLocation(renderer.shader, screen_rect_name.as_ptr()),
+                width as f32,
+                height as f32,
+            );
+            let win_rect_name = CString::new("win_rect").expect("unable to create cstring");
             for w in &mut wins {
                 gl::Uniform4f(
-                    gl::GetUniformLocation(renderer.shader, uniform_name.as_ptr()),
+                    gl::GetUniformLocation(renderer.shader, win_rect_name.as_ptr()),
                     w.rect.x as f32,
                     w.rect.y as f32,
                     w.rect.width as f32,
