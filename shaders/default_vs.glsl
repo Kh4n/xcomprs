@@ -13,7 +13,7 @@ void main() {
   // ndc_t = normalized device coordinate transform
   // the translation and scale for our transform matrix
   vec4 ndc_t = vec4(
-    2.0*win_rect.x/w - 1, 2.0*win_rect.y/h + 1,
+    2.0*win_rect.x/w - 1.0, 1.0 - 2.0*win_rect.y/h,
     2.0*win_rect.z/w, 2.0*win_rect.w/h
   );
 
