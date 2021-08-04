@@ -443,6 +443,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ffb080b3f2f616242a4eb8e7d325035312127901025b0052bc3154a282d0f19"
 dependencies = [
  "gethostname",
+ "libc",
  "nix",
  "winapi",
  "winapi-wsapoll",

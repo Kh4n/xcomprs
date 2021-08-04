@@ -8,7 +8,7 @@ const GL_BINDINGS_FILE: &str = "gl_bindings.rs";
 const GLX_BINDINGS_FILE: &str = "glx_bindings.rs";
 const XLIB_BINDINGS_FILE: &str = "xlib_bindings.rs";
 
-const GLX_EXTENSIONS: [&str; 1] = ["GLX_EXT_texture_from_pixmap"];
+const GLX_EXTENSIONS: [&str; 2] = ["GLX_EXT_texture_from_pixmap", "GLX_ARB_create_context"];
 
 const XLIB_FUNCTIONS: [&str; 5] = [
     "XOpenDisplay",
@@ -32,11 +32,11 @@ fn main() {
     for var in XLIB_VARS {
         builder = builder.allowlist_var(var);
     }
-    let bindings = builder.generate().expect("Unable to generate bindings");
+    let bindings = builder.generate().expect("unable to generate bindings");
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
         .write_to_file(out_path.join(XLIB_BINDINGS_FILE))
-        .expect("Couldn't write bindings!");
+        .expect("couldn't write bindings!");
 
     let dest = env::var("OUT_DIR").unwrap();
     let mut file = File::create(&Path::new(&dest).join(GL_BINDINGS_FILE)).unwrap();
