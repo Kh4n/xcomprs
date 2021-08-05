@@ -14,4 +14,4 @@ bindgen = "0.59.1"
 gl_generator = "0.5.4"
 
 [features]
-default = ["x11rb/composite", "x11rb/allow-unsafe-code", "x11rb/shape", "x11rb/xfixes"]
+default = ["x11rb/composite", "x11rb/allow-unsafe-code", "x11rb/shape", "x11rb/xfixes", "x11rb/damage"]
