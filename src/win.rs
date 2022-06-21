@@ -1,18 +1,26 @@
+use crate::ewm;
+use crate::ewm::RootWindowHintCodes;
 use crate::gl;
 use crate::gl_renderer;
 use crate::glx;
 
+use std::convert::TryFrom;
 use std::error::Error;
 use std::ffi::{c_void, CStr, CString};
 use std::fmt::Debug;
 use std::mem::{size_of, size_of_val};
 use std::ptr::{null, null_mut};
 
+use byteorder::ByteOrder;
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::composite::ConnectionExt as composite_ConnectionExt;
 use x11rb::protocol::damage::ConnectionExt as damage_ConnectionExt;
-use x11rb::protocol::shape::{ConnectionExt as shape_CompositeExt, SK, SO};
+use x11rb::protocol::damage::Damage;
+use x11rb::protocol::damage::ReportLevel;
+use x11rb::protocol::shape::{ConnectionExt as shape_ConnectionExt, SK, SO};
 use x11rb::protocol::xfixes::{ConnectionExt, Region};
+use x11rb::protocol::xproto::Atom;
+use x11rb::protocol::xproto::AtomEnum;
 use x11rb::protocol::xproto::{
     ChangeWindowAttributesAux, ClipOrdering, ConfigureNotifyEvent,
     ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent, DestroyNotifyEvent, EventMask,
@@ -46,6 +54,9 @@ pub struct Win {
     pub rect: Rect,
 
     handle: Window,
+    pub damage: Damage,
+    pub region: Region,
+
     border_width: u16,
     override_redirect: bool,
     mapped: bool,
@@ -71,10 +82,14 @@ impl Win {
         border_width: u16,
         override_redirect: bool,
         mapped: bool,
+        conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
     ) -> Result<Win, Box<dyn Error>> {
         let mut ret = Win {
             handle: handle,
+            damage: 0,
+            region: 0,
+
             rect: Rect::new(x, y, width, height),
             border_width: border_width,
             override_redirect: override_redirect,
@@ -84,7 +99,6 @@ impl Win {
             glx_pixmap: 0,
             vao: 0,
             texture: 0,
-            // renderer: renderer,
         };
         renderer.initialize(&mut ret);
         Ok(ret)
@@ -118,11 +132,13 @@ impl Win {
             geom.border_width,
             attrs.override_redirect,
             mapped,
-            &renderer,
+            conn,
+            renderer,
         )
     }
     pub fn new_event(
         evt: &CreateNotifyEvent,
+        conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
     ) -> Result<Win, Box<dyn Error>> {
         Win::new_raw(
@@ -134,7 +150,8 @@ impl Win {
             evt.border_width,
             evt.override_redirect,
             false,
-            &renderer,
+            conn,
+            renderer,
         )
     }
 
@@ -147,6 +164,20 @@ impl Win {
         renderer: &gl_renderer::GLRenderer,
     ) -> Result<(), Box<dyn Error>> {
         self.mapped = true;
+        self.damage = conn.generate_id()?;
+        self.region = conn.generate_id()?;
+        conn.damage_create(self.damage, self.handle, ReportLevel::NON_EMPTY)?
+            .check()?;
+        conn.xfixes_create_region(
+            self.region,
+            &[Rectangle {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            }],
+        )?
+        .check()?;
         self.override_redirect = evt.override_redirect;
         self.reacquire_pixmap(evt.window, display, config, conn, renderer)?;
         Ok(())
@@ -160,8 +191,11 @@ impl Win {
         &mut self,
         evt: &DestroyNotifyEvent,
         display: *mut glx::types::Display,
+        conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
     ) -> Result<(), Box<dyn Error>> {
+        // TODO: what does damage_destroy do??
+        // conn.damage_destroy(self.damage)?.check()?;
         self.release_pixmap(display, renderer)?;
         Ok(())
     }
@@ -174,8 +208,8 @@ impl Win {
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
     ) -> Result<(), Box<dyn Error>> {
+        // if we're not mapped, no pixmap to reacquire
         if !self.mapped {
-            // if we're not mapped, no pixmap to reacquire
             return Ok(());
         }
         self.pixmap = conn.generate_id().expect("could not gen id");
@@ -189,30 +223,11 @@ impl Win {
         display: *mut glx::types::Display,
         renderer: &gl_renderer::GLRenderer,
     ) -> Result<(), Box<dyn Error>> {
+        // if not mapped, we already released the pixmaps/textures
         if !self.mapped {
-            // if not mapped, we already released the pixmaps/textures
             return Ok(());
         }
         renderer.release_glx_pixmap(self, display);
-        Ok(())
-    }
-
-    // TODO: handle all configure notify possibilities (stacking order, etc.)
-    pub fn configure(
-        &mut self,
-        evt: &ConfigureNotifyEvent,
-        display: *mut glx::types::Display,
-        config: *const c_void,
-        conn: &impl x11rb::connection::Connection,
-        renderer: &gl_renderer::GLRenderer,
-    ) -> Result<(), Box<dyn Error>> {
-        self.rect.x = evt.x;
-        self.rect.y = evt.y;
-        if self.rect.width != evt.width || self.rect.height != evt.height {
-            self.reacquire_pixmap(evt.window, display, config, conn, renderer)?;
-            self.rect.width = evt.width;
-            self.rect.height = evt.height;
-        }
         Ok(())
     }
 }
@@ -220,6 +235,7 @@ impl Drop for Win {
     fn drop(&mut self) {}
 }
 
+#[derive(Debug)]
 pub struct WinTracker {
     wins: Vec<Win>,
 }
@@ -258,38 +274,34 @@ impl WinTracker {
     ) -> Result<(), Box<dyn Error>> {
         match event {
             Some(e) => {
-                println!("event: {:?}", e);
+                println!("event: {:?}, num wins: {}", e, self.wins.len());
                 match e {
                     CreateNotify(create) => {
-                        self.wins.push(
-                            Win::new_event(&create, &renderer).expect("could not track window"),
-                        );
+                        self.wins.push(Win::new_event(&create, conn, renderer)?);
                     }
                     MapNotify(map) => {
                         let w = self
                             .wins
                             .iter_mut()
                             .find(|w| w.handle == map.window)
-                            .expect("map notified with untracked window!");
-                        w.map(&map, display, config, conn, renderer)
-                            .expect("could not map window");
+                            .ok_or("map notified with untracked window!")?;
+                        w.map(&map, display, config, conn, renderer)?;
                     }
                     ConfigureNotify(conf) => {
                         let w = self
                             .wins
-                            .iter_mut()
-                            .find(|w| w.handle == conf.window)
-                            .expect("configure notified with untracked window!");
-                        w.configure(&conf, display, config, conn, renderer)
-                            .expect("could not configure window");
+                            .iter()
+                            .position(|w| w.handle == conf.window)
+                            .ok_or("configure notified with untracked window!")?;
+                        self.configure(w, &conf, display, config, conn, renderer)?;
                     }
                     UnmapNotify(unmap) => {
                         let w = self
                             .wins
                             .iter_mut()
                             .find(|w| w.handle == unmap.window)
-                            .expect("unmap notified with untracked window!");
-                        w.unmap(&unmap).expect("could not unmap window");
+                            .ok_or("unmap notified with untracked window!")?;
+                        w.unmap(&unmap)?;
                     }
                     DestroyNotify(destroy) => {
                         self.wins
@@ -297,30 +309,101 @@ impl WinTracker {
                                 self.wins
                                     .iter()
                                     .position(|w| w.handle == destroy.window)
-                                    .expect("destroy notify for untracked window"),
+                                    .ok_or("destroy notify for untracked window")?,
                             )
-                            .destroy(&destroy, display, renderer)
-                            .expect("could not destroy window");
+                            .destroy(&destroy, display, conn, renderer)?;
                     }
+                    PropertyNotify(prop) => match RootWindowHintCodes::try_from(prop.atom) {
+                        Ok(RootWindowHintCodes::_NET_ACTIVE_WINDOW) => {
+                            if prop.window != self.get_root_win().handle {
+                                Err("root window atom's target was not root window")?;
+                            }
+                        }
+                        Ok(RootWindowHintCodes::_NET_CLIENT_LIST_STACKING) => {
+                            if prop.window != self.get_root_win().handle {
+                                Err("root window atom's target was not root window")?;
+                            }
+                            let res = conn
+                                .get_property(
+                                    false,
+                                    self.get_root_win().handle,
+                                    RootWindowHintCodes::_NET_CLIENT_LIST_STACKING as u32,
+                                    AtomEnum::ANY,
+                                    0,
+                                    self.wins.len() as u32,
+                                )?
+                                .reply()?;
+                            for j in (4..=res.value.len()).step_by(4) {
+                                let w_id = byteorder::LittleEndian::read_u32(
+                                    &res.value.as_slice()[j - 4..j],
+                                );
+                                print!("id: {} ", w_id);
+                            }
+                            println!("stacking info: {:?}", res);
+                        }
+                        _ => println!(
+                            "unhandled atom #: {}, name: {}",
+                            prop.atom,
+                            std::str::from_utf8(
+                                conn.get_atom_name(prop.atom)?.reply()?.name.as_slice()
+                            )?
+                        ),
+                    },
                     _ => println!("unhandled event!"),
                 }
             }
             None => (),
         }
-        renderer.render(width, height, self, display, overlay);
+        renderer.render(width, height, self, display, overlay, conn)?;
         Ok(())
+    }
+
+    // TODO: handle all configure notify possibilities (stacking order, etc.)
+    pub fn configure(
+        &mut self,
+        win_pos: usize,
+        evt: &ConfigureNotifyEvent,
+        display: *mut glx::types::Display,
+        config: *const c_void,
+        conn: &impl x11rb::connection::Connection,
+        renderer: &gl_renderer::GLRenderer,
+    ) -> Result<(), Box<dyn Error>> {
+        let win = &mut self.wins[win_pos];
+        win.rect.x = evt.x;
+        win.rect.y = evt.y;
+        if win.rect.width != evt.width || win.rect.height != evt.height {
+            win.reacquire_pixmap(evt.window, display, config, conn, renderer)?;
+            win.rect.width = evt.width;
+            win.rect.height = evt.height;
+        }
+
+        if (win_pos == 0 && evt.above_sibling != 0)
+            || (win_pos > 0 && self.wins[win_pos - 1].handle != evt.above_sibling)
+        {
+            let target = self.wins.remove(win_pos);
+            let target_pos = match evt.above_sibling {
+                0 => 0,
+                _ => self
+                    .wins
+                    .iter()
+                    .position(|w| w.handle == evt.above_sibling)
+                    .ok_or("above sibling window not found")?,
+            };
+            if target_pos == self.wins.len() - 1 {
+                self.wins.push(target);
+            } else {
+                self.wins.insert(target_pos + 1, target);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn get_root_win(&self) -> &Win {
+        &self.wins[0]
     }
 
     pub fn mapped_wins(&self) -> impl Iterator<Item = &Win> {
         self.wins.iter().filter(|w| w.mapped).into_iter()
     }
 }
-
-// impl<'a> IntoIterator for &'a WinTracker {
-//     type Item = <std::slice::Iter<'a, Win> as Iterator>::Item;
-//     type IntoIter = std::slice::Iter<'a, Win>;
-
-//     fn into_iter(self) -> Self::IntoIter {
-//         self.wins.as_slice().into_iter()
-//     }
-// }

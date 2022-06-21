@@ -282,7 +282,8 @@ impl GLRenderer {
         wins: &win::WinTracker,
         display: *mut glx::types::Display,
         overlay: Window,
-    ) {
+        conn: &impl x11rb::connection::Connection,
+    ) -> Result<(), Box<dyn Error>> {
         unsafe {
             // no need to clear (well you do, but not if you want to use xdamage etc)
             // gl::ClearColor(0.2, 0.2, 0.1, 1.0);
@@ -300,25 +301,40 @@ impl GLRenderer {
                 height as f32,
             );
             for w in wins.mapped_wins() {
-                gl::Uniform4f(
-                    gl::GetUniformLocation(self.desc.shader, self.desc.win_rect_name.as_ptr()),
-                    w.rect.x as f32,
-                    w.rect.y as f32,
-                    w.rect.width as f32,
-                    w.rect.height as f32,
-                );
-                gl::ActiveTexture(gl::TEXTURE0);
-                gl::BindTexture(gl::TEXTURE_2D, w.texture);
-                glx::BindTexImageEXT(
-                    display as *mut glx::types::Display,
-                    w.glx_pixmap,
-                    glx::FRONT_EXT as i32,
-                    null(),
-                );
-                gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, null());
-                glx::ReleaseTexImageEXT(display, w.glx_pixmap, glx::FRONT_EXT as i32);
+                self.render_win(w, display);
             }
             glx::SwapBuffers(display, overlay as u64);
         }
+        Ok(())
+    }
+
+    unsafe fn render_win(&self, w: &win::Win, display: *mut glx::types::Display) {
+        gl::Uniform4f(
+            gl::GetUniformLocation(self.desc.shader, self.desc.win_rect_name.as_ptr()),
+            w.rect.x as f32,
+            w.rect.y as f32,
+            w.rect.width as f32,
+            w.rect.height as f32,
+        );
+        gl::ActiveTexture(gl::TEXTURE0);
+        gl::BindTexture(gl::TEXTURE_2D, w.texture);
+        glx::BindTexImageEXT(
+            display as *mut glx::types::Display,
+            w.glx_pixmap,
+            glx::FRONT_EXT as i32,
+            null(),
+        );
+        gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, null());
+        glx::ReleaseTexImageEXT(display, w.glx_pixmap, glx::FRONT_EXT as i32);
+        // conn.xfixes_set_region(
+        //     w.region,
+        //     &[Rectangle {
+        //         x: 0,
+        //         y: 0,
+        //         width: w.rect.width,
+        //         height: w.rect.height,
+        //     }],
+        // )?
+        // .check()?;
     }
 }

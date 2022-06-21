@@ -1,3 +1,4 @@
+mod ewm;
 mod gl;
 mod gl_renderer;
 mod glx;
@@ -13,8 +14,8 @@ use std::ptr::{null, null_mut};
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::composite::ConnectionExt as composite_ConnectionExt;
 use x11rb::protocol::damage::ConnectionExt as damage_ConnectionExt;
-use x11rb::protocol::shape::{ConnectionExt as shape_CompositeExt, SK, SO};
-use x11rb::protocol::xfixes::{ConnectionExt, Region};
+use x11rb::protocol::shape::{ConnectionExt as shape_ConnectionExt, SK, SO};
+use x11rb::protocol::xfixes::{ConnectionExt as xfixes_ConnectionExt, Region};
 use x11rb::protocol::xproto::{
     ChangeWindowAttributesAux, ClipOrdering, ConfigureNotifyEvent,
     ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent, DestroyNotifyEvent, EventMask,
@@ -120,7 +121,7 @@ pub fn main() {
         xfixes_ver_reply.major_version, xfixes_ver_reply.minor_version
     );
     let xdamage_ver_reply = conn
-        .damage_query_version(5, 0)
+        .damage_query_version(1, 1)
         .expect("could not connect to server")
         .reply()
         .expect("could not query xdamage version");
@@ -213,17 +214,19 @@ pub fn main() {
     // .check()
     // .expect("error getting reply");
 
-    let mut rect = [Rectangle {
-        x: 0,
-        y: 0,
-        width: 0,
-        height: 0,
-    }];
     let region = conn.generate_id().expect("could not generate id");
-    conn.xfixes_create_region(region, &mut rect)
-        .expect("could not connect to server")
-        .check()
-        .expect("could not create region");
+    conn.xfixes_create_region(
+        region,
+        &[Rectangle {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        }],
+    )
+    .expect("could not connect to server")
+    .check()
+    .expect("could not create region");
     conn.xfixes_set_window_shape_region(overlay, SK::INPUT, 0, 0, region as Region)
         .expect("could not connect to server")
         .check()
