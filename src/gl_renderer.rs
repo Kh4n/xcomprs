@@ -1,3 +1,4 @@
+use crate::errors;
 use crate::gl;
 use crate::glx;
 use crate::win;
@@ -50,7 +51,7 @@ impl WindowDrawDesc {
         indices: &Vec<u32>,
         vs_path: &str,
         fs_path: &str,
-    ) -> Result<WindowDrawDesc, Box<dyn Error>> {
+    ) -> Result<WindowDrawDesc, errors::CompError> {
         WindowDrawDesc::new(
             verts,
             indices,
@@ -63,7 +64,7 @@ impl WindowDrawDesc {
         indices: &Vec<u32>,
         vs_source: &String,
         fs_source: &String,
-    ) -> Result<WindowDrawDesc, Box<dyn Error>> {
+    ) -> Result<WindowDrawDesc, errors::CompError> {
         let mut ret = WindowDrawDesc {
             vao: 0,
             shader: 0,
@@ -226,7 +227,7 @@ pub struct GLRenderer {
 
 // TODO: draw borders
 impl GLRenderer {
-    pub fn new(desc: WindowDrawDesc) -> Result<GLRenderer, Box<dyn Error>> {
+    pub fn new(desc: WindowDrawDesc) -> Result<GLRenderer, errors::CompError> {
         Ok(GLRenderer { desc: desc })
     }
 
@@ -283,7 +284,7 @@ impl GLRenderer {
         display: *mut glx::types::Display,
         overlay: Window,
         conn: &impl x11rb::connection::Connection,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), errors::CompError> {
         unsafe {
             // no need to clear (well you do, but not if you want to use xdamage etc)
             // gl::ClearColor(0.2, 0.2, 0.1, 1.0);

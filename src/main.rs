@@ -1,3 +1,4 @@
+mod errors;
 mod ewm;
 mod gl;
 mod gl_renderer;
@@ -23,6 +24,8 @@ use x11rb::protocol::xproto::{
 };
 use x11rb::protocol::Event::*;
 use x11rb::xcb_ffi::XCBConnection;
+
+use crate::errors::CompError;
 
 const CONTEXT_ATTRS: [i32; 5] = [
     glx::CONTEXT_MAJOR_VERSION_ARB as i32,
@@ -285,21 +288,33 @@ pub fn main() {
     .check()
     .expect("unable to register event masks");
 
-    let mut tracker =
-        win::WinTracker::new(root, &conn, &renderer).expect("could not create window tracker");
+    let mut tracker = win::WinTracker::new(root, overlay, &conn, &renderer)
+        .expect("could not create window tracker");
     loop {
         let event = conn.poll_for_event().unwrap();
-        tracker
-            .process_and_render(
-                &event,
-                display as *mut glx::types::Display,
-                fb_config as *mut c_void,
-                &conn,
-                width,
-                height,
-                overlay,
-                &renderer,
-            )
-            .expect("could not process and render");
+        match tracker.process_and_render(
+            &event,
+            display as *mut glx::types::Display,
+            fb_config as *mut c_void,
+            &conn,
+            width,
+            height,
+            overlay,
+            &renderer,
+        ) {
+            Err(e) => {
+                match &e {
+                    CompError::Reply(r) => match r {
+                        x11rb::rust_connection::ReplyError::X11Error(x_err) => {
+                            println!("error info (TODO: xcb version of XgetError)");
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+                panic!("could not process and render: {:?}", e);
+            }
+            _ => {}
+        };
     }
 }

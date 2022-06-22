@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 x11rb = "0.8.1"
 byteorder = "1.4.3"
+derive_more = "0.99.17"
 
 [build-dependencies]
 bindgen = "0.59.1"

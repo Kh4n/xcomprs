@@ -1,3 +1,4 @@
+use crate::errors;
 use crate::ewm;
 use crate::ewm::RootWindowHintCodes;
 use crate::gl;
@@ -21,6 +22,7 @@ use x11rb::protocol::shape::{ConnectionExt as shape_ConnectionExt, SK, SO};
 use x11rb::protocol::xfixes::{ConnectionExt, Region};
 use x11rb::protocol::xproto::Atom;
 use x11rb::protocol::xproto::AtomEnum;
+use x11rb::protocol::xproto::WindowClass;
 use x11rb::protocol::xproto::{
     ChangeWindowAttributesAux, ClipOrdering, ConfigureNotifyEvent,
     ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent, DestroyNotifyEvent, EventMask,
@@ -28,6 +30,7 @@ use x11rb::protocol::xproto::{
 };
 use x11rb::protocol::Event;
 use x11rb::protocol::Event::*;
+use x11rb::rust_connection::ConnectionError;
 use x11rb::xcb_ffi::XCBConnection;
 
 #[derive(Debug)]
@@ -55,7 +58,6 @@ pub struct Win {
 
     handle: Window,
     pub damage: Damage,
-    pub region: Region,
 
     border_width: u16,
     override_redirect: bool,
@@ -81,15 +83,15 @@ impl Win {
         height: u16,
         border_width: u16,
         override_redirect: bool,
+        class: WindowClass,
         mapped: bool,
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<Win, Box<dyn Error>> {
+        track_damage: bool,
+    ) -> Result<Win, errors::CompError> {
         let mut ret = Win {
             handle: handle,
             damage: 0,
-            region: 0,
-
             rect: Rect::new(x, y, width, height),
             border_width: border_width,
             override_redirect: override_redirect,
@@ -101,13 +103,23 @@ impl Win {
             texture: 0,
         };
         renderer.initialize(&mut ret);
+
+        if class != WindowClass::INPUT_ONLY && track_damage {
+            ret.damage = conn.generate_id()?;
+            // conn.damage_create(self.damage, self.handle, ReportLevel::RAW_RECTANGLES)?
+            // conn.damage_create(ret.damage, ret.handle, ReportLevel::DELTA_RECTANGLES)?
+            conn.damage_create(ret.damage, ret.handle, ReportLevel::NON_EMPTY)?
+                .check()?;
+        }
+
         Ok(ret)
     }
     pub fn new_handle(
         handle: Window,
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<Win, Box<dyn Error>> {
+        track_damage: bool,
+    ) -> Result<Win, errors::CompError> {
         let geom = conn
             .get_geometry(handle)
             .expect("could not connect to server")
@@ -117,7 +129,7 @@ impl Win {
             .get_window_attributes(handle)
             .expect("could not connect to server")
             .reply()
-            .expect("could not get root window attributes");
+            .expect("could not get window attributes");
         let mapped = match attrs.map_state {
             MapState::UNMAPPED => false,
             MapState::UNVIEWABLE | MapState::VIEWABLE => true,
@@ -131,16 +143,25 @@ impl Win {
             geom.height,
             geom.border_width,
             attrs.override_redirect,
+            attrs.class,
             mapped,
             conn,
             renderer,
+            track_damage,
         )
     }
     pub fn new_event(
         evt: &CreateNotifyEvent,
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<Win, Box<dyn Error>> {
+        track_damage: bool,
+    ) -> Result<Win, errors::CompError> {
+        let attrs = conn
+            .get_window_attributes(evt.window)
+            .expect("could not connect to server")
+            .reply()
+            .expect("could not get window attributes");
+
         Win::new_raw(
             evt.window,
             evt.x,
@@ -149,9 +170,11 @@ impl Win {
             evt.height,
             evt.border_width,
             evt.override_redirect,
+            attrs.class,
             false,
             conn,
             renderer,
+            track_damage,
         )
     }
 
@@ -162,27 +185,17 @@ impl Win {
         config: *const c_void,
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), errors::CompError> {
         self.mapped = true;
-        self.damage = conn.generate_id()?;
-        self.region = conn.generate_id()?;
-        conn.damage_create(self.damage, self.handle, ReportLevel::NON_EMPTY)?
-            .check()?;
-        conn.xfixes_create_region(
-            self.region,
-            &[Rectangle {
-                x: 0,
-                y: 0,
-                width: 0,
-                height: 0,
-            }],
-        )?
-        .check()?;
         self.override_redirect = evt.override_redirect;
         self.reacquire_pixmap(evt.window, display, config, conn, renderer)?;
         Ok(())
     }
-    pub fn unmap(&mut self, evt: &UnmapNotifyEvent) -> Result<(), Box<dyn Error>> {
+    pub fn unmap(
+        &mut self,
+        evt: &UnmapNotifyEvent,
+        conn: &impl x11rb::connection::Connection,
+    ) -> Result<(), errors::CompError> {
         self.mapped = false;
         Ok(())
     }
@@ -193,9 +206,11 @@ impl Win {
         display: *mut glx::types::Display,
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<(), Box<dyn Error>> {
-        // TODO: what does damage_destroy do??
-        // conn.damage_destroy(self.damage)?.check()?;
+    ) -> Result<(), errors::CompError> {
+        if self.damage != 0 {
+            // apparently when destroying damage you can get a BadDamage. idk why. both picom and xcompmgr ignore the error :/
+            conn.damage_destroy(self.damage)?.ignore_error();
+        }
         self.release_pixmap(display, renderer)?;
         Ok(())
     }
@@ -207,7 +222,7 @@ impl Win {
         config: *const c_void,
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), errors::CompError> {
         // if we're not mapped, no pixmap to reacquire
         if !self.mapped {
             return Ok(());
@@ -222,7 +237,7 @@ impl Win {
         &mut self,
         display: *mut glx::types::Display,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), errors::CompError> {
         // if not mapped, we already released the pixmaps/textures
         if !self.mapped {
             return Ok(());
@@ -237,18 +252,30 @@ impl Drop for Win {
 
 #[derive(Debug)]
 pub struct WinTracker {
+    root: Window,
+    overlay: Window,
     wins: Vec<Win>,
+
+    region: Region,
 }
 
 impl WinTracker {
     pub fn new(
         root: Window,
+        overlay: Window,
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<WinTracker, Box<dyn Error>> {
+    ) -> Result<WinTracker, errors::CompError> {
         let mut ret = WinTracker {
-            wins: vec![Win::new_handle(root, conn, renderer)?],
+            root: root,
+            overlay: overlay,
+            wins: vec![Win::new_handle(root, conn, renderer, false)?],
+
+            region: conn.generate_id()?,
         };
+
+        conn.xfixes_create_region(ret.region, &[])?.check()?;
+
         let children = conn
             .query_tree(root)
             .expect("could not connect to server")
@@ -256,7 +283,8 @@ impl WinTracker {
             .expect("unable to query children")
             .children;
         for child in children {
-            ret.wins.push(Win::new_handle(child, conn, renderer)?);
+            ret.wins
+                .push(Win::new_handle(child, conn, renderer, child != overlay)?);
         }
         Ok(ret)
     }
@@ -271,20 +299,21 @@ impl WinTracker {
         height: u16,
         overlay: Window,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), errors::CompError> {
         match event {
             Some(e) => {
                 println!("event: {:?}, num wins: {}", e, self.wins.len());
                 match e {
                     CreateNotify(create) => {
-                        self.wins.push(Win::new_event(&create, conn, renderer)?);
+                        self.wins
+                            .push(Win::new_event(&create, conn, renderer, true)?);
                     }
                     MapNotify(map) => {
                         let w = self
                             .wins
                             .iter_mut()
                             .find(|w| w.handle == map.window)
-                            .ok_or("map notified with untracked window!")?;
+                            .ok_or("map notified with untracked window!".to_string())?;
                         w.map(&map, display, config, conn, renderer)?;
                     }
                     ConfigureNotify(conf) => {
@@ -292,7 +321,7 @@ impl WinTracker {
                             .wins
                             .iter()
                             .position(|w| w.handle == conf.window)
-                            .ok_or("configure notified with untracked window!")?;
+                            .ok_or("configure notified with untracked window!".to_string())?;
                         self.configure(w, &conf, display, config, conn, renderer)?;
                     }
                     UnmapNotify(unmap) => {
@@ -300,8 +329,8 @@ impl WinTracker {
                             .wins
                             .iter_mut()
                             .find(|w| w.handle == unmap.window)
-                            .ok_or("unmap notified with untracked window!")?;
-                        w.unmap(&unmap)?;
+                            .ok_or("unmap notified with untracked window!".to_string())?;
+                        w.unmap(&unmap, conn)?;
                     }
                     DestroyNotify(destroy) => {
                         self.wins
@@ -309,24 +338,24 @@ impl WinTracker {
                                 self.wins
                                     .iter()
                                     .position(|w| w.handle == destroy.window)
-                                    .ok_or("destroy notify for untracked window")?,
+                                    .ok_or("destroy notify for untracked window".to_string())?,
                             )
                             .destroy(&destroy, display, conn, renderer)?;
                     }
                     PropertyNotify(prop) => match RootWindowHintCodes::try_from(prop.atom) {
                         Ok(RootWindowHintCodes::_NET_ACTIVE_WINDOW) => {
-                            if prop.window != self.get_root_win().handle {
-                                Err("root window atom's target was not root window")?;
+                            if prop.window != self.get_composite_win().handle {
+                                Err("root window atom's target was not root window".to_string())?;
                             }
                         }
                         Ok(RootWindowHintCodes::_NET_CLIENT_LIST_STACKING) => {
-                            if prop.window != self.get_root_win().handle {
-                                Err("root window atom's target was not root window")?;
+                            if prop.window != self.get_composite_win().handle {
+                                Err("root window atom's target was not root window".to_string())?;
                             }
                             let res = conn
                                 .get_property(
                                     false,
-                                    self.get_root_win().handle,
+                                    self.get_composite_win().handle,
                                     RootWindowHintCodes::_NET_CLIENT_LIST_STACKING as u32,
                                     AtomEnum::ANY,
                                     0,
@@ -349,6 +378,18 @@ impl WinTracker {
                             )?
                         ),
                     },
+                    DamageNotify(damage) => {
+                        // sometimes damage is sent after things are cleaned up (i think?) so this throws an error
+                        // same thing in xcompmgr and picom src :/
+                        if conn
+                            .damage_subtract(damage.damage, 0 as u32, self.region)?
+                            .check()
+                            .is_ok()
+                        {
+                            let fetch = conn.xfixes_fetch_region(self.region)?.reply()?;
+                            println!("fetch: {:?}", fetch);
+                        }
+                    }
                     _ => println!("unhandled event!"),
                 }
             }
@@ -367,7 +408,7 @@ impl WinTracker {
         config: *const c_void,
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), errors::CompError> {
         let win = &mut self.wins[win_pos];
         win.rect.x = evt.x;
         win.rect.y = evt.y;
@@ -387,7 +428,7 @@ impl WinTracker {
                     .wins
                     .iter()
                     .position(|w| w.handle == evt.above_sibling)
-                    .ok_or("above sibling window not found")?,
+                    .ok_or("above sibling window not found".to_string())?,
             };
             if target_pos == self.wins.len() - 1 {
                 self.wins.push(target);
@@ -399,7 +440,7 @@ impl WinTracker {
         Ok(())
     }
 
-    pub fn get_root_win(&self) -> &Win {
+    pub fn get_composite_win(&self) -> &Win {
         &self.wins[0]
     }
 
