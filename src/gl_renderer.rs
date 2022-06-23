@@ -4,24 +4,22 @@ use crate::glx;
 use crate::win;
 use crate::xlib;
 
-use std::error::Error;
-use std::ffi::{c_void, CStr, CString};
+
+use std::ffi::{c_void, CString};
 use std::fmt::Debug;
-use std::mem::{size_of, size_of_val};
+use std::mem::{size_of};
 use std::ptr::{null, null_mut};
 
-use x11rb::connection::{Connection, RequestConnection};
-use x11rb::protocol::composite::ConnectionExt as composite_ConnectionExt;
-use x11rb::protocol::damage::ConnectionExt as damage_ConnectionExt;
-use x11rb::protocol::shape::{ConnectionExt as shape_CompositeExt, SK, SO};
-use x11rb::protocol::xfixes::{ConnectionExt, Region};
+
+
+
+
+
 use x11rb::protocol::xproto::{
-    ChangeWindowAttributesAux, ClipOrdering, ConfigureNotifyEvent,
-    ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent, DestroyNotifyEvent, EventMask,
-    MapNotifyEvent, MapState, Pixmap, Rectangle, UnmapNotifyEvent, Window,
+    Window,
 };
-use x11rb::protocol::Event::*;
-use x11rb::xcb_ffi::XCBConnection;
+
+
 
 const PIXMAP_ATTRS: [i32; 5] = [
     glx::TEXTURE_TARGET_EXT as i32,
@@ -283,7 +281,7 @@ impl GLRenderer {
         wins: &win::WinTracker,
         display: *mut glx::types::Display,
         overlay: Window,
-        conn: &impl x11rb::connection::Connection,
+        _conn: &impl x11rb::connection::Connection,
     ) -> Result<(), errors::CompError> {
         unsafe {
             // no need to clear (well you do, but not if you want to use xdamage etc)

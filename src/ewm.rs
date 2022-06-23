@@ -24,7 +24,7 @@ macro_rules! back_to_enum {
 
 back_to_enum! {
     pub enum RootWindowHintCodes {
-        _NET_CLIENT_LIST_STACKING = 246,
-        _NET_ACTIVE_WINDOW = 252,
+        NetClientListStacking = 246,
+        NetActiveWindow = 252,
     }
 }

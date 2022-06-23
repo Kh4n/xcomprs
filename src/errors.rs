@@ -1,4 +1,4 @@
-use std::{ffi::NulError, fmt, str::Utf8Error};
+use std::{ffi::NulError, str::Utf8Error};
 
 use derive_more::From;
 use x11rb::rust_connection::{ConnectionError, ReplyError, ReplyOrIdError};

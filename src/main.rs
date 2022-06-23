@@ -6,23 +6,22 @@ mod glx;
 mod win;
 mod xlib;
 
-use std::error::Error;
+
 use std::ffi::{c_void, CStr, CString};
-use std::fmt::Debug;
-use std::mem::{size_of, size_of_val};
-use std::ptr::{null, null_mut};
+
+
+use std::ptr::{null_mut};
 
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::composite::ConnectionExt as composite_ConnectionExt;
 use x11rb::protocol::damage::ConnectionExt as damage_ConnectionExt;
-use x11rb::protocol::shape::{ConnectionExt as shape_ConnectionExt, SK, SO};
+use x11rb::protocol::shape::{ConnectionExt as shape_ConnectionExt, SK};
 use x11rb::protocol::xfixes::{ConnectionExt as xfixes_ConnectionExt, Region};
 use x11rb::protocol::xproto::{
-    ChangeWindowAttributesAux, ClipOrdering, ConfigureNotifyEvent,
-    ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent, DestroyNotifyEvent, EventMask,
-    MapNotifyEvent, MapState, Pixmap, Rectangle, UnmapNotifyEvent, Window,
+    ChangeWindowAttributesAux,
+    ConnectionExt as xproto_ConnectionExt, EventMask, Rectangle,
 };
-use x11rb::protocol::Event::*;
+
 use x11rb::xcb_ffi::XCBConnection;
 
 use crate::errors::CompError;
@@ -304,7 +303,7 @@ pub fn main() {
             Err(e) => {
                 match &e {
                     CompError::Reply(r) => match r {
-                        x11rb::rust_connection::ReplyError::X11Error(x_err) => {
+                        x11rb::rust_connection::ReplyError::X11Error(_x_err) => {
                             println!("error info (TODO: xcb version of XgetError)");
                         }
                         _ => {}

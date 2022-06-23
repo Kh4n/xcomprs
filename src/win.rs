@@ -1,37 +1,32 @@
 use crate::errors;
-use crate::ewm;
+
 use crate::ewm::RootWindowHintCodes;
 use crate::gl;
 use crate::gl_renderer;
 use crate::glx;
 
 use std::convert::TryFrom;
-use std::error::Error;
-use std::ffi::{c_void, CStr, CString};
+
+use std::ffi::c_void;
 use std::fmt::Debug;
-use std::mem::{size_of, size_of_val};
-use std::ptr::{null, null_mut};
 
 use byteorder::ByteOrder;
-use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::composite::ConnectionExt as composite_ConnectionExt;
 use x11rb::protocol::damage::ConnectionExt as damage_ConnectionExt;
 use x11rb::protocol::damage::Damage;
 use x11rb::protocol::damage::ReportLevel;
-use x11rb::protocol::shape::{ConnectionExt as shape_ConnectionExt, SK, SO};
+
 use x11rb::protocol::xfixes::{ConnectionExt, Region};
-use x11rb::protocol::xproto::Atom;
+
 use x11rb::protocol::xproto::AtomEnum;
 use x11rb::protocol::xproto::WindowClass;
 use x11rb::protocol::xproto::{
-    ChangeWindowAttributesAux, ClipOrdering, ConfigureNotifyEvent,
-    ConnectionExt as xproto_ConnectionExt, CreateNotifyEvent, DestroyNotifyEvent, EventMask,
-    MapNotifyEvent, MapState, Pixmap, Rectangle, UnmapNotifyEvent, Window,
+    ChangeWindowAttributesAux, ConfigureNotifyEvent, ConnectionExt as xproto_ConnectionExt,
+    CreateNotifyEvent, DestroyNotifyEvent, EventMask, MapNotifyEvent, MapState, UnmapNotifyEvent,
+    Window,
 };
 use x11rb::protocol::Event;
 use x11rb::protocol::Event::*;
-use x11rb::rust_connection::ConnectionError;
-use x11rb::xcb_ffi::XCBConnection;
 
 #[derive(Debug)]
 pub struct Rect {
@@ -199,8 +194,8 @@ impl Win {
     }
     pub fn unmap(
         &mut self,
-        evt: &UnmapNotifyEvent,
-        conn: &impl x11rb::connection::Connection,
+        _evt: &UnmapNotifyEvent,
+        _conn: &impl x11rb::connection::Connection,
     ) -> Result<(), errors::CompError> {
         self.mapped = false;
         Ok(())
@@ -208,7 +203,7 @@ impl Win {
 
     pub fn destroy(
         &mut self,
-        evt: &DestroyNotifyEvent,
+        _evt: &DestroyNotifyEvent,
         display: *mut glx::types::Display,
         conn: &impl x11rb::connection::Connection,
         renderer: &gl_renderer::GLRenderer,
@@ -346,12 +341,12 @@ impl WinTracker {
                             .destroy(&destroy, display, conn, renderer)?;
                     }
                     PropertyNotify(prop) => match RootWindowHintCodes::try_from(prop.atom) {
-                        Ok(RootWindowHintCodes::_NET_ACTIVE_WINDOW) => {
+                        Ok(RootWindowHintCodes::NetActiveWindow) => {
                             if prop.window != self.get_composite_win().handle {
                                 Err("root window atom's target was not root window".to_string())?;
                             }
                         }
-                        Ok(RootWindowHintCodes::_NET_CLIENT_LIST_STACKING) => {
+                        Ok(RootWindowHintCodes::NetClientListStacking) => {
                             if prop.window != self.get_composite_win().handle {
                                 Err("root window atom's target was not root window".to_string())?;
                             }
@@ -359,7 +354,7 @@ impl WinTracker {
                                 .get_property(
                                     false,
                                     self.get_composite_win().handle,
-                                    RootWindowHintCodes::_NET_CLIENT_LIST_STACKING as u32,
+                                    RootWindowHintCodes::NetClientListStacking as u32,
                                     AtomEnum::ANY,
                                     0,
                                     self.wins.len() as u32,
