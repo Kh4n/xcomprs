@@ -301,9 +301,7 @@ impl GLRenderer {
                 width as f32,
                 height as f32,
             );
-            for w in wins.mapped_wins() {
-                self.render_win(w, display);
-            }
+            wins.mapped_wins().for_each(|w| self.render_win(w, display));
             glx::SwapBuffers(display, overlay as u64);
         }
         Ok(())

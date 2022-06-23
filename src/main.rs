@@ -280,7 +280,6 @@ pub fn main() {
         &ChangeWindowAttributesAux::new().event_mask(
             EventMask::STRUCTURE_NOTIFY
                 | EventMask::SUBSTRUCTURE_NOTIFY
-                | EventMask::EXPOSURE
                 | EventMask::PROPERTY_CHANGE,
         ),
     )

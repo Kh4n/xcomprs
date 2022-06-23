@@ -110,6 +110,12 @@ impl Win {
             // conn.damage_create(ret.damage, ret.handle, ReportLevel::DELTA_RECTANGLES)?
             conn.damage_create(ret.damage, ret.handle, ReportLevel::NON_EMPTY)?
                 .check()?;
+
+            conn.change_window_attributes(
+                handle,
+                &ChangeWindowAttributesAux::new().event_mask(EventMask::EXPOSURE),
+            )?
+            .check()?;
         }
 
         Ok(ret)
@@ -274,15 +280,12 @@ impl WinTracker {
             region: conn.generate_id()?,
         };
 
+        // reusable empty region for damage fetch requests
         conn.xfixes_create_region(ret.region, &[])?.check()?;
 
-        let children = conn
-            .query_tree(root)
-            .expect("could not connect to server")
-            .reply()
-            .expect("unable to query children")
-            .children;
+        let children = conn.query_tree(root)?.reply()?.children;
         for child in children {
+            // don't want to track overlay damage as we will be spammed with events (they fire every frame for the whole overlay)
             ret.wins
                 .push(Win::new_handle(child, conn, renderer, child != overlay)?);
         }
