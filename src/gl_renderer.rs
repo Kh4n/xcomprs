@@ -4,22 +4,12 @@ use crate::glx;
 use crate::win;
 use crate::xlib;
 
-
 use std::ffi::{c_void, CString};
 use std::fmt::Debug;
-use std::mem::{size_of};
+use std::mem::size_of;
 use std::ptr::{null, null_mut};
 
-
-
-
-
-
-use x11rb::protocol::xproto::{
-    Window,
-};
-
-
+use x11rb::protocol::xproto::Window;
 
 const PIXMAP_ATTRS: [i32; 5] = [
     glx::TEXTURE_TARGET_EXT as i32,
@@ -227,11 +217,6 @@ pub struct GLRenderer {
 impl GLRenderer {
     pub fn new(desc: WindowDrawDesc) -> Result<GLRenderer, errors::CompError> {
         Ok(GLRenderer { desc: desc })
-    }
-
-    pub fn initialize(&self, win: &mut win::Win) {
-        assert!(win.vao == 0, "window vao is already set");
-        win.vao = self.desc.vao;
     }
 
     pub fn reacquire_glx_pixmap(

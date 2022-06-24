@@ -6,11 +6,9 @@ mod glx;
 mod win;
 mod xlib;
 
-
 use std::ffi::{c_void, CStr, CString};
 
-
-use std::ptr::{null_mut};
+use std::ptr::null_mut;
 
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::composite::ConnectionExt as composite_ConnectionExt;
@@ -18,8 +16,7 @@ use x11rb::protocol::damage::ConnectionExt as damage_ConnectionExt;
 use x11rb::protocol::shape::{ConnectionExt as shape_ConnectionExt, SK};
 use x11rb::protocol::xfixes::{ConnectionExt as xfixes_ConnectionExt, Region};
 use x11rb::protocol::xproto::{
-    ChangeWindowAttributesAux,
-    ConnectionExt as xproto_ConnectionExt, EventMask, Rectangle,
+    ChangeWindowAttributesAux, ConnectionExt as xproto_ConnectionExt, EventMask, Rectangle,
 };
 
 use x11rb::xcb_ffi::XCBConnection;
@@ -286,8 +283,8 @@ pub fn main() {
     .check()
     .expect("unable to register event masks");
 
-    let mut tracker = win::WinTracker::new(root, overlay, &conn, &renderer)
-        .expect("could not create window tracker");
+    let mut tracker =
+        win::WinTracker::new(root, overlay, &conn).expect("could not create window tracker");
     loop {
         let event = conn.poll_for_event().unwrap();
         match tracker.process_and_render(

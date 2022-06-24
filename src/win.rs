@@ -63,7 +63,6 @@ pub struct Win {
 
     // TODO: decouple this more
     pub glx_pixmap: glx::types::GLXPixmap,
-    pub vao: gl::types::GLuint,
     /// the gl texture of the window backing pixmap
     pub texture: gl::types::GLuint,
     // renderer: &'a gl_renderer::GLRenderer,
@@ -81,7 +80,6 @@ impl Win {
         class: WindowClass,
         mapped: bool,
         conn: &impl x11rb::connection::Connection,
-        renderer: &gl_renderer::GLRenderer,
         track_damage: bool,
     ) -> Result<Win, errors::CompError> {
         let mut ret = Win {
@@ -94,10 +92,8 @@ impl Win {
 
             pixmap: 0,
             glx_pixmap: 0,
-            vao: 0,
             texture: 0,
         };
-        renderer.initialize(&mut ret);
 
         if class != WindowClass::INPUT_ONLY && track_damage {
             ret.damage = conn.generate_id()?;
@@ -118,7 +114,6 @@ impl Win {
     pub fn new_handle(
         handle: Window,
         conn: &impl x11rb::connection::Connection,
-        renderer: &gl_renderer::GLRenderer,
         track_damage: bool,
     ) -> Result<Win, errors::CompError> {
         let geom = conn
@@ -147,14 +142,12 @@ impl Win {
             attrs.class,
             mapped,
             conn,
-            renderer,
             track_damage,
         )
     }
     pub fn new_event(
         evt: &CreateNotifyEvent,
         conn: &impl x11rb::connection::Connection,
-        renderer: &gl_renderer::GLRenderer,
         track_damage: bool,
     ) -> Result<Win, errors::CompError> {
         let attrs = conn
@@ -174,7 +167,6 @@ impl Win {
             attrs.class,
             false,
             conn,
-            renderer,
             track_damage,
         )
     }
@@ -265,12 +257,11 @@ impl WinTracker {
         root: Window,
         overlay: Window,
         conn: &impl x11rb::connection::Connection,
-        renderer: &gl_renderer::GLRenderer,
     ) -> Result<WinTracker, errors::CompError> {
         let mut ret = WinTracker {
             root: root,
             overlay: overlay,
-            wins: vec![Win::new_handle(root, conn, renderer, false)?],
+            wins: vec![Win::new_handle(root, conn, false)?],
 
             region: conn.generate_id()?,
         };
@@ -282,7 +273,7 @@ impl WinTracker {
         for child in children {
             // don't want to track overlay damage as we will be spammed with events (they fire every frame for the whole overlay)
             ret.wins
-                .push(Win::new_handle(child, conn, renderer, child != overlay)?);
+                .push(Win::new_handle(child, conn, child != overlay)?);
         }
         Ok(ret)
     }
@@ -303,8 +294,7 @@ impl WinTracker {
                 println!("event: {:?}, num wins: {}", e, self.wins.len());
                 match e {
                     CreateNotify(create) => {
-                        self.wins
-                            .push(Win::new_event(&create, conn, renderer, true)?);
+                        self.wins.push(Win::new_event(&create, conn, true)?);
                     }
                     MapNotify(map) => {
                         let w = self
