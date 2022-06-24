@@ -116,16 +116,8 @@ impl Win {
         conn: &impl x11rb::connection::Connection,
         track_damage: bool,
     ) -> Result<Win, errors::CompError> {
-        let geom = conn
-            .get_geometry(handle)
-            .expect("could not connect to server")
-            .reply()
-            .expect("could not get geometry");
-        let attrs = conn
-            .get_window_attributes(handle)
-            .expect("could not connect to server")
-            .reply()
-            .expect("could not get window attributes");
+        let geom = conn.get_geometry(handle)?.reply()?;
+        let attrs = conn.get_window_attributes(handle)?.reply()?;
         let mapped = match attrs.map_state {
             MapState::UNMAPPED => false,
             MapState::UNVIEWABLE | MapState::VIEWABLE => true,
@@ -150,11 +142,13 @@ impl Win {
         conn: &impl x11rb::connection::Connection,
         track_damage: bool,
     ) -> Result<Win, errors::CompError> {
-        let attrs = conn
-            .get_window_attributes(evt.window)
-            .expect("could not connect to server")
-            .reply()
-            .expect("could not get window attributes");
+        let mut class = WindowClass::INPUT_ONLY;
+        let attrs = conn.get_window_attributes(evt.window)?.reply();
+        if attrs.is_ok() {
+            class = attrs.unwrap().class;
+        } else {
+            println!("warning: window created but could not query its attributes (perhaps it was destroyed immediately?)");
+        }
 
         Win::new_raw(
             evt.window,
@@ -164,7 +158,7 @@ impl Win {
             evt.height,
             evt.border_width,
             evt.override_redirect,
-            attrs.class,
+            class,
             false,
             conn,
             track_damage,

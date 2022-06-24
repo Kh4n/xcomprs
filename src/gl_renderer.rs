@@ -308,15 +308,5 @@ impl GLRenderer {
         );
         gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, null());
         glx::ReleaseTexImageEXT(display, w.glx_pixmap, glx::FRONT_EXT as i32);
-        // conn.xfixes_set_region(
-        //     w.region,
-        //     &[Rectangle {
-        //         x: 0,
-        //         y: 0,
-        //         width: w.rect.width,
-        //         height: w.rect.height,
-        //     }],
-        // )?
-        // .check()?;
     }
 }
