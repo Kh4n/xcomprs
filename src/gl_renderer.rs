@@ -4,6 +4,7 @@ use crate::glx;
 use crate::win;
 use crate::xlib;
 
+use std::convert::TryInto;
 use std::ffi::{c_void, CString};
 use std::fmt::Debug;
 use std::mem::size_of;
@@ -26,114 +27,102 @@ const WIN_TEXTURE_UNIFORM_NAME: &'static str = "win_texture";
 #[derive(Debug)]
 pub struct WindowDrawDesc {
     vao: gl::types::GLuint,
-    shader: gl::types::GLuint,
+    win_shader: gl::types::GLuint,
+    screen_shader: gl::types::GLuint,
 
-    win_rect_name: CString,
-    screen_rect_name: CString,
-    win_texture_name: CString,
+    fbo_target: gl::types::GLuint,
+    fbo_background: gl::types::GLuint,
+
+    win_rect_uniform_handle: gl::types::GLint,
+    screen_rect_uniform_handle: gl::types::GLint,
+    win_texture_uniform_handle: gl::types::GLint,
 }
 
 impl WindowDrawDesc {
     pub fn new_shader_paths(
         verts: &Vec<f32>,
         indices: &Vec<u32>,
-        vs_path: &str,
-        fs_path: &str,
+
+        win_vs_path: &str,
+        win_fs_path: &str,
+        screen_vs_path: &str,
+        screen_fs_path: &str,
+
+        screen_width: u16,
+        screen_height: u16,
     ) -> Result<WindowDrawDesc, errors::CompError> {
         WindowDrawDesc::new(
             verts,
             indices,
-            &std::fs::read_to_string(vs_path)?,
-            &std::fs::read_to_string(fs_path)?,
+            &std::fs::read_to_string(win_vs_path)?,
+            &std::fs::read_to_string(win_fs_path)?,
+            &std::fs::read_to_string(screen_vs_path)?,
+            &std::fs::read_to_string(screen_fs_path)?,
+            screen_width,
+            screen_height,
         )
     }
     pub fn new(
         verts: &Vec<f32>,
         indices: &Vec<u32>,
-        vs_source: &String,
-        fs_source: &String,
+
+        win_vs_source: &String,
+        win_fs_source: &String,
+        screen_vs_source: &String,
+        screen_fs_source: &String,
+
+        screen_width: u16,
+        screen_height: u16,
     ) -> Result<WindowDrawDesc, errors::CompError> {
         let mut ret = WindowDrawDesc {
             vao: 0,
-            shader: 0,
-            win_rect_name: CString::new(WIN_RECT_UNIFORM_NAME)?,
-            screen_rect_name: CString::new(SCREEN_RECT_UNIFORM_NAME)?,
-            win_texture_name: CString::new(WIN_TEXTURE_UNIFORM_NAME)?,
+            win_shader: 0,
+            screen_shader: 0,
+
+            fbo_target: 0,
+            fbo_background: 0,
+
+            win_rect_uniform_handle: 0,
+            screen_rect_uniform_handle: 0,
+            win_texture_uniform_handle: 0,
         };
 
         let mut vbo: gl::types::GLuint = 0;
         let mut ebo: gl::types::GLuint = 0;
 
-        let vs_source = CString::new(vs_source.as_bytes())?;
-        let fs_source = CString::new(fs_source.as_bytes())?;
         unsafe {
-            let vertex_shader = gl::CreateShader(gl::VERTEX_SHADER);
-            gl::ShaderSource(vertex_shader, 1, &vs_source.as_ptr(), null());
-            gl::CompileShader(vertex_shader);
-            let mut success: i32 = 0;
-            let mut log: [u8; 512] = [0; 512];
-            gl::GetShaderiv(vertex_shader, gl::COMPILE_STATUS, &mut success);
-            if success == gl::FALSE as i32 {
-                gl::GetShaderInfoLog(
-                    vertex_shader,
-                    512,
-                    null_mut(),
-                    &mut log as *mut _ as *mut i8,
-                );
-                Err(format!(
-                    "unable to compile shader: {:?}",
-                    String::from_utf8_lossy(&log)
-                ))?;
-            }
-            let frag_shader = gl::CreateShader(gl::FRAGMENT_SHADER);
-            gl::ShaderSource(frag_shader, 1, &fs_source.as_ptr(), null());
-            gl::CompileShader(frag_shader);
-            gl::GetShaderiv(frag_shader, gl::COMPILE_STATUS, &mut success);
-            if success == gl::FALSE as i32 {
-                gl::GetShaderInfoLog(frag_shader, 512, null_mut(), &mut log as *mut _ as *mut i8);
-                Err(format!(
-                    "unable to compile shader: {:?}",
-                    String::from_utf8_lossy(&log)
-                ))?;
-            }
-
-            ret.shader = gl::CreateProgram();
-            gl::AttachShader(ret.shader, vertex_shader);
-            gl::AttachShader(ret.shader, frag_shader);
-            gl::LinkProgram(ret.shader);
-            gl::GetProgramiv(ret.shader, gl::LINK_STATUS, &mut success);
-            if success == gl::FALSE as i32 {
-                gl::GetShaderInfoLog(ret.shader, 512, null_mut(), &mut log as *mut _ as *mut i8);
-                Err(format!(
-                    "unable to link shader: {:?}",
-                    String::from_utf8_lossy(&log)
-                ))?;
-            }
-            gl::DetachShader(ret.shader, vertex_shader);
-            gl::DetachShader(ret.shader, frag_shader);
-            gl::DeleteShader(vertex_shader);
-            gl::DeleteShader(frag_shader);
+            ret.win_shader = create_shader(
+                CString::new(win_vs_source.as_bytes())?,
+                CString::new(win_fs_source.as_bytes())?,
+            )?;
 
             // test if shader has uniforms we need
-            // gl::UseProgram(ret.shader);
-            let (w, s, t) = (
-                gl::GetUniformLocation(ret.shader, ret.win_rect_name.as_ptr()),
-                gl::GetUniformLocation(ret.shader, ret.screen_rect_name.as_ptr()),
-                gl::GetUniformLocation(ret.shader, ret.win_texture_name.as_ptr()),
+            gl::UseProgram(ret.win_shader);
+            ret.win_rect_uniform_handle = gl::GetUniformLocation(
+                ret.win_shader,
+                CString::new(WIN_RECT_UNIFORM_NAME)?.as_ptr(),
             );
-            if w < 0 {
+            ret.screen_rect_uniform_handle = gl::GetUniformLocation(
+                ret.win_shader,
+                CString::new(SCREEN_RECT_UNIFORM_NAME)?.as_ptr(),
+            );
+            ret.win_texture_uniform_handle = gl::GetUniformLocation(
+                ret.win_shader,
+                CString::new(WIN_TEXTURE_UNIFORM_NAME)?.as_ptr(),
+            );
+            if ret.win_rect_uniform_handle < 0 {
                 Err(format!(
                     "the shader does not define '{}'",
                     WIN_RECT_UNIFORM_NAME
                 ))?
             }
-            if s < 0 {
+            if ret.screen_rect_uniform_handle < 0 {
                 Err(format!(
                     "the shader does not define '{}'",
                     SCREEN_RECT_UNIFORM_NAME
                 ))?
             }
-            if t < 0 {
+            if ret.win_texture_uniform_handle < 0 {
                 Err(format!(
                     "the shader does not define '{}'",
                     WIN_TEXTURE_UNIFORM_NAME
@@ -161,15 +150,15 @@ impl WindowDrawDesc {
         }
 
         unsafe {
-            gl::GenVertexArrays(1, &mut ret.vao as *mut u32);
-            gl::GenBuffers(1, &mut vbo as *mut u32);
-            gl::GenBuffers(1, &mut ebo as *mut u32);
+            gl::GenVertexArrays(1, &mut ret.vao as *mut gl::types::GLuint);
+            gl::GenBuffers(1, &mut vbo as *mut gl::types::GLuint);
+            gl::GenBuffers(1, &mut ebo as *mut gl::types::GLuint);
 
             gl::BindVertexArray(ret.vao);
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
             gl::BufferData(
                 gl::ARRAY_BUFFER,
-                (verts.len() * size_of::<f32>()) as isize,
+                (verts.len() * size_of::<f32>()) as gl::types::GLsizeiptr,
                 verts.as_ptr() as *const c_void,
                 gl::STATIC_DRAW,
             );
@@ -179,7 +168,7 @@ impl WindowDrawDesc {
                 2,
                 gl::FLOAT,
                 gl::FALSE,
-                (4 * size_of::<f32>()) as i32,
+                (4 * size_of::<f32>()) as gl::types::GLsizei,
                 0 as *const c_void,
             );
             gl::EnableVertexAttribArray(0);
@@ -189,7 +178,7 @@ impl WindowDrawDesc {
                 2,
                 gl::FLOAT,
                 gl::FALSE,
-                (4 * size_of::<f32>()) as i32,
+                (4 * size_of::<f32>()) as gl::types::GLsizei,
                 (2 * size_of::<f32>()) as *const c_void,
             );
             gl::EnableVertexAttribArray(1);
@@ -203,8 +192,112 @@ impl WindowDrawDesc {
             );
         }
 
+        unsafe {
+            ret.fbo_target = gen_framebuffer(screen_width, screen_height)?;
+            ret.fbo_background = gen_framebuffer(screen_width, screen_height)?;
+        }
+
         Ok(ret)
     }
+}
+
+unsafe fn create_shader(
+    vs_source: CString,
+    fs_source: CString,
+) -> Result<gl::types::GLuint, errors::CompError> {
+    let vertex_shader = compile_shader(vs_source, gl::VERTEX_SHADER)?;
+    let frag_shader = compile_shader(fs_source, gl::FRAGMENT_SHADER)?;
+    let ret = link_shaders(vertex_shader, frag_shader)?;
+
+    gl::DetachShader(ret, vertex_shader);
+    gl::DetachShader(ret, frag_shader);
+    gl::DeleteShader(vertex_shader);
+    gl::DeleteShader(frag_shader);
+
+    Ok(ret)
+}
+
+unsafe fn link_shaders(
+    vertex_shader: u32,
+    frag_shader: u32,
+) -> Result<gl::types::GLuint, errors::CompError> {
+    let ret = gl::CreateProgram();
+    gl::AttachShader(ret, vertex_shader);
+    gl::AttachShader(ret, frag_shader);
+    gl::LinkProgram(ret);
+
+    let mut success: gl::types::GLint = 0;
+    let mut log: [u8; 512] = [0; 512];
+    gl::GetProgramiv(ret, gl::LINK_STATUS, &mut success);
+    if success == gl::FALSE as i32 {
+        gl::GetShaderInfoLog(ret, 512, null_mut(), &mut log as *mut _ as *mut i8);
+        Err(format!(
+            "unable to link shader: {:?}",
+            String::from_utf8_lossy(&log)
+        ))?;
+    };
+    Ok(ret)
+}
+
+unsafe fn compile_shader(
+    source: CString,
+    shader_type: gl::types::GLenum,
+) -> Result<u32, errors::CompError> {
+    let shader = gl::CreateShader(shader_type);
+    gl::ShaderSource(shader, 1, &source.as_ptr(), null());
+    gl::CompileShader(shader);
+    let mut success: gl::types::GLint = 0;
+    let mut log: [u8; 512] = [0; 512];
+    gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success);
+    if success == gl::FALSE as gl::types::GLint {
+        gl::GetShaderInfoLog(shader, 512, null_mut(), &mut log as *mut _ as *mut i8);
+        Err(format!(
+            "unable to compile shader: {:?}",
+            String::from_utf8_lossy(&log)
+        ))?;
+    }
+    Ok(shader)
+}
+
+unsafe fn gen_framebuffer(
+    screen_width: u16,
+    screen_height: u16,
+) -> Result<gl::types::GLuint, errors::CompError> {
+    let mut fbo: gl::types::GLuint = 0;
+    gl::GenFramebuffers(1, &mut fbo as *mut gl::types::GLuint);
+    gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+    let mut texture: gl::types::GLuint = 0;
+    gl::GenTextures(1, &mut texture as *mut gl::types::GLuint);
+    gl::BindTexture(gl::TEXTURE_2D, texture);
+    gl::TexImage2D(
+        gl::TEXTURE_2D,
+        0,
+        gl::RGB.try_into()?,
+        screen_width as i32,
+        screen_height as i32,
+        0,
+        gl::RGB,
+        gl::UNSIGNED_BYTE,
+        null(),
+    );
+    gl::TexParameteri(
+        gl::TEXTURE_2D,
+        gl::TEXTURE_MIN_FILTER,
+        gl::NEAREST as gl::types::GLint,
+    );
+    gl::TexParameteri(
+        gl::TEXTURE_2D,
+        gl::TEXTURE_MAG_FILTER,
+        gl::NEAREST as gl::types::GLint,
+    );
+    gl::FramebufferTexture2D(
+        gl::FRAMEBUFFER,
+        gl::COLOR_ATTACHMENT0,
+        gl::TEXTURE_2D,
+        texture,
+        0,
+    );
+    Ok(fbo)
 }
 
 #[derive(Debug)]
@@ -241,11 +334,27 @@ impl GLRenderer {
             );
             gl::GenTextures(1, &mut win.texture);
             gl::BindTexture(gl::TEXTURE_2D, win.texture);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
+            gl::TexParameteri(
+                gl::TEXTURE_2D,
+                gl::TEXTURE_WRAP_S,
+                gl::REPEAT as gl::types::GLint,
+            );
+            gl::TexParameteri(
+                gl::TEXTURE_2D,
+                gl::TEXTURE_WRAP_T,
+                gl::REPEAT as gl::types::GLint,
+            );
             // nearest, as the windows should be a 1:1 match
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+            gl::TexParameteri(
+                gl::TEXTURE_2D,
+                gl::TEXTURE_MIN_FILTER,
+                gl::NEAREST as gl::types::GLint,
+            );
+            gl::TexParameteri(
+                gl::TEXTURE_2D,
+                gl::TEXTURE_MAG_FILTER,
+                gl::NEAREST as gl::types::GLint,
+            );
             // TODO: find out why using linear makes it blurry (it really shouldn't)
             // gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
             // gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
@@ -273,18 +382,17 @@ impl GLRenderer {
             // gl::ClearColor(0.2, 0.2, 0.1, 1.0);
             // gl::Clear(gl::COLOR_BUFFER_BIT);
 
-            gl::UseProgram(self.desc.shader);
-            gl::Uniform1i(
-                gl::GetUniformLocation(self.desc.shader, self.desc.win_texture_name.as_ptr()),
-                0,
-            );
+            gl::UseProgram(self.desc.win_shader);
+            gl::Uniform1i(self.desc.win_texture_uniform_handle, 0);
             gl::BindVertexArray(self.desc.vao);
             gl::Uniform2f(
-                gl::GetUniformLocation(self.desc.shader, self.desc.screen_rect_name.as_ptr()),
+                self.desc.screen_rect_uniform_handle,
                 width as f32,
                 height as f32,
             );
             wins.mapped_wins().for_each(|w| self.render_win(w, display));
+
+            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
             glx::SwapBuffers(display, overlay as u64);
         }
         Ok(())
@@ -292,7 +400,7 @@ impl GLRenderer {
 
     unsafe fn render_win(&self, w: &win::Win, display: *mut glx::types::Display) {
         gl::Uniform4f(
-            gl::GetUniformLocation(self.desc.shader, self.desc.win_rect_name.as_ptr()),
+            self.desc.win_rect_uniform_handle,
             w.rect.x as f32,
             w.rect.y as f32,
             w.rect.width as f32,

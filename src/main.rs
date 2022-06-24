@@ -264,6 +264,9 @@ pub fn main() {
         ],
         "./shaders/default_vs.glsl",
         "./shaders/default_fs.glsl",
+        "./shaders/screen_vs.glsl",
+        "./shaders/screen_fs.glsl",
+        width, height
     ).expect("could not create window draw description");
     let renderer = gl_renderer::GLRenderer::new(desc).expect("unable to create renderer");
 
