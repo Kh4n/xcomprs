@@ -324,12 +324,13 @@ unsafe fn gen_framebuffer(
     gl::TexParameteri(
         gl::TEXTURE_2D,
         gl::TEXTURE_MIN_FILTER,
-        gl::NEAREST as gl::types::GLint,
+        gl::LINEAR as gl::types::GLint,
     );
     gl::TexParameteri(
         gl::TEXTURE_2D,
         gl::TEXTURE_MAG_FILTER,
-        gl::NEAREST as gl::types::GLint,
+        // TODO: figure out if LINEAR is necessary here
+        gl::LINEAR as gl::types::GLint,
     );
     gl::FramebufferTexture2D(
         gl::FRAMEBUFFER,
@@ -379,16 +380,6 @@ impl GLRenderer {
             );
             gl::GenTextures(1, &mut win.texture);
             gl::BindTexture(gl::TEXTURE_2D, win.texture);
-            gl::TexParameteri(
-                gl::TEXTURE_2D,
-                gl::TEXTURE_WRAP_S,
-                gl::REPEAT as gl::types::GLint,
-            );
-            gl::TexParameteri(
-                gl::TEXTURE_2D,
-                gl::TEXTURE_WRAP_T,
-                gl::REPEAT as gl::types::GLint,
-            );
             // nearest, as the windows should be a 1:1 match
             gl::TexParameteri(
                 gl::TEXTURE_2D,
@@ -400,9 +391,6 @@ impl GLRenderer {
                 gl::TEXTURE_MAG_FILTER,
                 gl::NEAREST as gl::types::GLint,
             );
-            // TODO: find out why using linear makes it blurry (it really shouldn't)
-            // gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
-            // gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
         }
     }
     pub fn release_glx_pixmap(&self, win: &mut win::Win, display: *mut glx::types::Display) {
