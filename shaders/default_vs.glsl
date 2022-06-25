@@ -10,12 +10,16 @@ out vec2 tex_coord;
 void main() {
   float w = screen_rect.x;
   float h = screen_rect.y;
-  // ndc_t = normalized device coordinate transform
-  // the translation and scale for our transform matrix
+  // // ndc_t = normalized device coordinate transform
+  // // the translation and scale for our transform matrix
   vec4 ndc_t = vec4(
     2.0*win_rect.x/w - 1.0, 1.0 - 2.0*win_rect.y/h,
     2.0*win_rect.z/w, 2.0*win_rect.w/h
   );
+
+  // vec2 ndc_s = vec2(2.0*win_rect.z/w, 2.0*win_rect.w/h);
+  // vec2 ndc_s = vec2(1.0+0.0000001*win_rect.z/w, 1.0+0.0000001*win_rect.w/h);
+  // vec2 ndc_t = vec2(0, 0);
 
   // transform and scale the rectangle coords to the window
   mat4 transform = mat4(
@@ -24,6 +28,7 @@ void main() {
     0.0, 0.0, 1.0, 0.0,
     0.0, 0.0, 0.0, 1.0
   );
-  gl_Position = vec4(pos, 1.0, 1.0) * transform;
-  tex_coord = vec2(tex_coord_in.x, 1.0 - tex_coord_in.y);
+
+  gl_Position = vec4(pos, 0.0, 1.0) * transform;
+  tex_coord = vec2(tex_coord_in.x, 1 - tex_coord_in.y);
 }

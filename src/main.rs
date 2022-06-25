@@ -1,3 +1,5 @@
+#![feature(destructuring_assignment)]
+
 mod errors;
 mod ewm;
 mod gl;
@@ -262,6 +264,17 @@ pub fn main() {
             0, 1, 2,
             2, 1, 3
         ],
+        // &vec![
+        //     // x,y, u,v
+        //     -1.0, -1.0, 0.0, 0.0,
+        //      1.0, -1.0, 1.0, 0.0,
+        //      1.0,  1.0, 1.0, 1.0,
+        //     -1.0,  1.0, 0.0, 1.0,
+        // ],
+        // &vec![
+        //     0, 1, 2,
+        //     2, 3, 0
+        // ],
         "./shaders/default_vs.glsl",
         "./shaders/default_fs.glsl",
         "./shaders/screen_vs.glsl",

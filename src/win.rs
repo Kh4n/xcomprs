@@ -53,6 +53,7 @@ pub struct Win {
 
     handle: Window,
     pub damage: Damage,
+    pub track_damage: bool,
 
     border_width: u16,
     override_redirect: bool,
@@ -65,7 +66,6 @@ pub struct Win {
     pub glx_pixmap: glx::types::GLXPixmap,
     /// the gl texture of the window backing pixmap
     pub texture: gl::types::GLuint,
-    // renderer: &'a gl_renderer::GLRenderer,
 }
 
 impl Win {
@@ -85,6 +85,8 @@ impl Win {
         let mut ret = Win {
             handle: handle,
             damage: 0,
+            track_damage,
+
             rect: Rect::new(x, y, width, height),
             border_width: border_width,
             override_redirect: override_redirect,

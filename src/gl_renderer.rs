@@ -23,6 +23,14 @@ const PIXMAP_ATTRS: [i32; 5] = [
 const WIN_RECT_UNIFORM_NAME: &'static str = "win_rect";
 const SCREEN_RECT_UNIFORM_NAME: &'static str = "screen_rect";
 const WIN_TEXTURE_UNIFORM_NAME: &'static str = "win_texture";
+const BG_TEXTURE_UNIFORM_NAME: &'static str = "bg_texture";
+const SCREEN_TEXTURE_UNIFORM_NAME: &'static str = "screen_texture";
+
+#[derive(Debug)]
+struct FboTexture {
+    fbo: gl::types::GLuint,
+    texture: gl::types::GLuint,
+}
 
 #[derive(Debug)]
 pub struct WindowDrawDesc {
@@ -30,12 +38,15 @@ pub struct WindowDrawDesc {
     win_shader: gl::types::GLuint,
     screen_shader: gl::types::GLuint,
 
-    fbo_target: gl::types::GLuint,
-    fbo_background: gl::types::GLuint,
+    target: FboTexture,
+    background: FboTexture,
 
     win_rect_uniform_handle: gl::types::GLint,
     screen_rect_uniform_handle: gl::types::GLint,
     win_texture_uniform_handle: gl::types::GLint,
+    bg_texture_uniform_handle: gl::types::GLint,
+
+    screen_texture_uniform_handle: gl::types::GLint,
 }
 
 impl WindowDrawDesc {
@@ -79,12 +90,15 @@ impl WindowDrawDesc {
             win_shader: 0,
             screen_shader: 0,
 
-            fbo_target: 0,
-            fbo_background: 0,
+            target: FboTexture { fbo: 0, texture: 0 },
+            background: FboTexture { fbo: 0, texture: 0 },
 
             win_rect_uniform_handle: 0,
             screen_rect_uniform_handle: 0,
             win_texture_uniform_handle: 0,
+            bg_texture_uniform_handle: 0,
+
+            screen_texture_uniform_handle: 0,
         };
 
         let mut vbo: gl::types::GLuint = 0;
@@ -110,22 +124,49 @@ impl WindowDrawDesc {
                 ret.win_shader,
                 CString::new(WIN_TEXTURE_UNIFORM_NAME)?.as_ptr(),
             );
+            ret.bg_texture_uniform_handle = gl::GetUniformLocation(
+                ret.win_shader,
+                CString::new(BG_TEXTURE_UNIFORM_NAME)?.as_ptr(),
+            );
             if ret.win_rect_uniform_handle < 0 {
                 Err(format!(
-                    "the shader does not define '{}'",
+                    "the window shader does not define or does not use '{}'",
                     WIN_RECT_UNIFORM_NAME
                 ))?
             }
             if ret.screen_rect_uniform_handle < 0 {
                 Err(format!(
-                    "the shader does not define '{}'",
+                    "the window shader does not define or does not use '{}'",
                     SCREEN_RECT_UNIFORM_NAME
                 ))?
             }
             if ret.win_texture_uniform_handle < 0 {
                 Err(format!(
-                    "the shader does not define '{}'",
+                    "the window shader does not define or does not use '{}'",
                     WIN_TEXTURE_UNIFORM_NAME
+                ))?
+            }
+            if ret.bg_texture_uniform_handle < 0 {
+                Err(format!(
+                    "the window shader does not define or does not use '{}'",
+                    BG_TEXTURE_UNIFORM_NAME
+                ))?
+            }
+        }
+
+        unsafe {
+            ret.screen_shader = create_shader(
+                CString::new(screen_vs_source.as_bytes())?,
+                CString::new(screen_fs_source.as_bytes())?,
+            )?;
+            ret.screen_texture_uniform_handle = gl::GetUniformLocation(
+                ret.screen_shader,
+                CString::new(SCREEN_TEXTURE_UNIFORM_NAME)?.as_ptr(),
+            );
+            if ret.screen_texture_uniform_handle < 0 {
+                Err(format!(
+                    "the shader does not define or does not use '{}'",
+                    SCREEN_TEXTURE_UNIFORM_NAME
                 ))?
             }
         }
@@ -193,8 +234,8 @@ impl WindowDrawDesc {
         }
 
         unsafe {
-            ret.fbo_target = gen_framebuffer(screen_width, screen_height)?;
-            ret.fbo_background = gen_framebuffer(screen_width, screen_height)?;
+            ret.target = gen_framebuffer(screen_width, screen_height)?;
+            ret.background = gen_framebuffer(screen_width, screen_height)?;
         }
 
         Ok(ret)
@@ -262,7 +303,7 @@ unsafe fn compile_shader(
 unsafe fn gen_framebuffer(
     screen_width: u16,
     screen_height: u16,
-) -> Result<gl::types::GLuint, errors::CompError> {
+) -> Result<FboTexture, errors::CompError> {
     let mut fbo: gl::types::GLuint = 0;
     gl::GenFramebuffers(1, &mut fbo as *mut gl::types::GLuint);
     gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
@@ -297,7 +338,10 @@ unsafe fn gen_framebuffer(
         texture,
         0,
     );
-    Ok(fbo)
+    Ok(FboTexture {
+        fbo: fbo,
+        texture: texture,
+    })
 }
 
 #[derive(Debug)]
@@ -307,6 +351,7 @@ pub struct GLRenderer {
 }
 
 // TODO: draw borders
+// TODO: find out what i meant by "draw borders"
 impl GLRenderer {
     pub fn new(desc: WindowDrawDesc) -> Result<GLRenderer, errors::CompError> {
         Ok(GLRenderer { desc: desc })
@@ -378,27 +423,53 @@ impl GLRenderer {
         _conn: &impl x11rb::connection::Connection,
     ) -> Result<(), errors::CompError> {
         unsafe {
-            // no need to clear (well you do, but not if you want to use xdamage etc)
-            // gl::ClearColor(0.2, 0.2, 0.1, 1.0);
-            // gl::Clear(gl::COLOR_BUFFER_BIT);
-
-            gl::UseProgram(self.desc.win_shader);
-            gl::Uniform1i(self.desc.win_texture_uniform_handle, 0);
             gl::BindVertexArray(self.desc.vao);
-            gl::Uniform2f(
-                self.desc.screen_rect_uniform_handle,
-                width as f32,
-                height as f32,
-            );
-            wins.mapped_wins().for_each(|w| self.render_win(w, display));
+            clear_fbo(self.desc.target.fbo);
+            clear_fbo(self.desc.background.fbo);
+            let (mut target, mut background) = (&self.desc.target, &self.desc.background);
 
+            for w in wins.mapped_wins() {
+                if !w.track_damage {
+                    continue;
+                }
+                (target, background) = (background, target);
+                gl::UseProgram(self.desc.screen_shader);
+                gl::Uniform1i(self.desc.screen_texture_uniform_handle, 0);
+                gl::ActiveTexture(gl::TEXTURE0);
+                gl::BindTexture(gl::TEXTURE_2D, background.texture);
+                gl::BindFramebuffer(gl::FRAMEBUFFER, target.fbo);
+                gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, null());
+
+                gl::UseProgram(self.desc.win_shader);
+                gl::Uniform1i(self.desc.win_texture_uniform_handle, 0);
+                gl::Uniform1i(self.desc.bg_texture_uniform_handle, 1);
+                gl::Uniform2f(
+                    self.desc.screen_rect_uniform_handle,
+                    width as f32,
+                    height as f32,
+                );
+                self.render_win(w, display, target, background);
+            }
+
+            gl::UseProgram(self.desc.screen_shader);
+            gl::Uniform1i(self.desc.screen_texture_uniform_handle, 0);
+            gl::ActiveTexture(gl::TEXTURE0);
+            gl::BindTexture(gl::TEXTURE_2D, target.texture);
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+            gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, null());
+
             glx::SwapBuffers(display, overlay as u64);
         }
         Ok(())
     }
 
-    unsafe fn render_win(&self, w: &win::Win, display: *mut glx::types::Display) {
+    unsafe fn render_win(
+        &self,
+        w: &win::Win,
+        display: *mut glx::types::Display,
+        target: &FboTexture,
+        background: &FboTexture,
+    ) {
         gl::Uniform4f(
             self.desc.win_rect_uniform_handle,
             w.rect.x as f32,
@@ -414,7 +485,19 @@ impl GLRenderer {
             glx::FRONT_EXT as i32,
             null(),
         );
+
+        gl::ActiveTexture(gl::TEXTURE1);
+        gl::BindTexture(gl::TEXTURE_2D, background.texture);
+        gl::BindFramebuffer(gl::FRAMEBUFFER, target.fbo);
+
         gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, null());
         glx::ReleaseTexImageEXT(display, w.glx_pixmap, glx::FRONT_EXT as i32);
     }
+}
+
+unsafe fn clear_fbo(fbo: u32) {
+    gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+    gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+    gl::Clear(gl::COLOR_BUFFER_BIT);
+    gl::Disable(gl::DEPTH_TEST);
 }
