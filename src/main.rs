@@ -33,6 +33,7 @@ const CONTEXT_ATTRS: [i32; 5] = [
     xlib::None as i32,
 ];
 
+// TODO: search through visuals properly
 const NUM_FB_ATTRS: usize = 13;
 #[rustfmt::skip]
 const FB_ATTRS: [i32; NUM_FB_ATTRS * 2 + 1] = [
@@ -42,17 +43,20 @@ const FB_ATTRS: [i32; NUM_FB_ATTRS * 2 + 1] = [
     glx::BIND_TO_TEXTURE_TARGETS_EXT as i32,
     glx::TEXTURE_2D_EXT as i32,
 
-    glx::Y_INVERTED_EXT as i32,
-    glx::DONT_CARE as i32,
+    // glx::Y_INVERTED_EXT as i32,
+    // glx::DONT_CARE as i32,
 
-    glx::DOUBLEBUFFER as i32,
-    true as i32,
+    // glx::DOUBLEBUFFER as i32,
+    // true as i32,
 
     glx::DRAWABLE_TYPE as i32,
-    glx::WINDOW_BIT as i32 | glx::PIXMAP_BIT as i32,
+    glx::PIXMAP_BIT as i32,
 
     glx::X_RENDERABLE as i32,
     true as i32,
+
+    glx::X_VISUAL_TYPE as i32,
+    glx::TRUE_COLOR as i32,
 
     glx::RED_SIZE as i32,
     8,
@@ -60,12 +64,14 @@ const FB_ATTRS: [i32; NUM_FB_ATTRS * 2 + 1] = [
     8,
     glx::BLUE_SIZE as i32,
     8,
-    glx::DEPTH_SIZE as i32,
-    24,
-    glx::STENCIL_SIZE as i32,
+    glx::ALPHA_SIZE as i32,
     8,
+    glx::DEPTH_SIZE as i32,
+    0,
+    glx::STENCIL_SIZE as i32,
+    0,
     glx::BUFFER_SIZE as i32,
-    32,
+    8*4,
 
     glx::RENDER_TYPE as i32,
     glx::RGBA_BIT as i32,
