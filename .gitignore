@@ -7,3 +7,6 @@
 
 # Misc
 scratch.rs
+OUT
+*.data
+*.data.old
