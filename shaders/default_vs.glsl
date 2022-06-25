@@ -29,6 +29,6 @@ void main() {
     0.0, 0.0, 0.0, 1.0
   );
 
-  gl_Position = vec4(pos, 0.0, 1.0) * transform;
+  gl_Position = transform * vec4(pos, 0.0, 1.0);
   tex_coord = vec2(tex_coord_in.x, 1 - tex_coord_in.y);
 }
