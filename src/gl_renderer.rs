@@ -330,6 +330,7 @@ unsafe fn gen_framebuffer(
         gl::TEXTURE_2D,
         gl::TEXTURE_MAG_FILTER,
         // TODO: figure out if LINEAR is necessary here
+        // depends on what kind of shaders you decide to use i suppose?
         gl::LINEAR as gl::types::GLint,
     );
     gl::FramebufferTexture2D(
@@ -358,40 +359,38 @@ impl GLRenderer {
         Ok(GLRenderer { desc: desc })
     }
 
-    pub fn reacquire_glx_pixmap(
+    pub unsafe fn reacquire_glx_pixmap(
         &self,
         win: &mut win::Win,
         display: *mut glx::types::Display,
         config: *const c_void,
     ) {
-        unsafe {
-            if win.glx_pixmap != 0 {
-                glx::DestroyGLXPixmap(display, win.glx_pixmap);
-            }
-            if win.texture != 0 {
-                gl::DeleteTextures(1, &win.texture);
-                win.texture = 0;
-            }
-            win.glx_pixmap = glx::CreatePixmap(
-                display,
-                config,
-                win.pixmap as u64,
-                &PIXMAP_ATTRS as *const i32,
-            );
-            gl::GenTextures(1, &mut win.texture);
-            gl::BindTexture(gl::TEXTURE_2D, win.texture);
-            // nearest, as the windows should be a 1:1 match
-            gl::TexParameteri(
-                gl::TEXTURE_2D,
-                gl::TEXTURE_MIN_FILTER,
-                gl::NEAREST as gl::types::GLint,
-            );
-            gl::TexParameteri(
-                gl::TEXTURE_2D,
-                gl::TEXTURE_MAG_FILTER,
-                gl::NEAREST as gl::types::GLint,
-            );
+        if win.glx_pixmap != 0 {
+            glx::DestroyGLXPixmap(display, win.glx_pixmap);
         }
+        if win.texture != 0 {
+            gl::DeleteTextures(1, &win.texture);
+            win.texture = 0;
+        }
+        win.glx_pixmap = glx::CreatePixmap(
+            display,
+            config,
+            win.pixmap as u64,
+            &PIXMAP_ATTRS as *const i32,
+        );
+        gl::GenTextures(1, &mut win.texture);
+        gl::BindTexture(gl::TEXTURE_2D, win.texture);
+        // nearest, as the windows should be a 1:1 match
+        gl::TexParameteri(
+            gl::TEXTURE_2D,
+            gl::TEXTURE_MIN_FILTER,
+            gl::NEAREST as gl::types::GLint,
+        );
+        gl::TexParameteri(
+            gl::TEXTURE_2D,
+            gl::TEXTURE_MAG_FILTER,
+            gl::NEAREST as gl::types::GLint,
+        );
     }
     pub fn release_glx_pixmap(&self, win: &mut win::Win, display: *mut glx::types::Display) {
         unsafe {

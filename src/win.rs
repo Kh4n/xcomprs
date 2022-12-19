@@ -219,7 +219,7 @@ impl Win {
         self.pixmap = conn.generate_id().expect("could not gen id");
         conn.composite_name_window_pixmap(window, self.pixmap)?
             .check()?;
-        renderer.reacquire_glx_pixmap(self, display, config);
+        unsafe { renderer.reacquire_glx_pixmap(self, display, config) }
         Ok(())
     }
     pub fn release_pixmap(
