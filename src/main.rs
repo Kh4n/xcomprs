@@ -5,6 +5,7 @@ mod ewm;
 mod gl;
 mod gl_renderer;
 mod glx;
+mod glx_util;
 mod win;
 mod xlib;
 
@@ -259,6 +260,7 @@ pub fn main() {
 
     #[rustfmt::skip]
     let desc = gl_renderer::WindowDrawDesc::new_shader_paths(
+        // square in bottom right
         &vec![
             // x,y, u,v
             0.0,  0.0, 0.0, 1.0,
